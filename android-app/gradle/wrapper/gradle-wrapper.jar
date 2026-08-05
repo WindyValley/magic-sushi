@@ -1,0 +1,11 @@
+PLACEHOLDER — NOT A REAL JAR
+This file is a text placeholder. The real gradle-wrapper.jar is a small ~60KB
+binary launcher downloaded from Gradle. We do not download it here because the
+environment already has gradle 8.5+ installed.
+
+To regenerate the real wrapper jar, run from the android-app/ directory:
+    gradle wrapper --gradle-version 8.5
+
+Until then, use the system `gradle` command directly:
+    gradle assembleDebug
+    gradle tasks

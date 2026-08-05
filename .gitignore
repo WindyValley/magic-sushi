@@ -1,0 +1,38 @@
+# --- Gradle / Android build outputs ---
+build/
+.gradle/
+.cxx/
+local.properties
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+captures/
+
+# --- IDE ---
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+
+# --- Build logs / scratch output ---
+build-output*.txt
+compile-out.txt
+dump.txt
+test-output.jar
+
+# --- Keystores / secrets ---
+*.jks
+*.keystore
+keystore.properties
+
+# --- OS cruft ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Logs ---
+*.log
+*.hprof

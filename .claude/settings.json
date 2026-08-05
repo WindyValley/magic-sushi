@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gradle testDebugUnitTest --tests \"top.windyvalley.magicsushi.engine.MatchEngineTest.detectMatches horizontal 3-in-a-row\" --info)",
+      "Bash(gradle testDebugUnitTest *)",
+      "Bash(gradle testDebugUnitTest)",
+      "Bash(gradle testDebugUnitTest --tests \"top.windyvalley.magicsushi.engine.AnimationEngineTest\")",
+      "Bash(gradle testDebugUnitTest --tests \"top.windyvalley.magicsushi.engine.AnimationEngineTest.frame1 tiles at post-gravity\" --tests \"top.windyvalley.magicsushi.engine.AnimationEngineTest.frame2 all tiles\" --tests \"top.windyvalley.magicsushi.engine.AnimationEngineTest.frame2 spawn-in\")",
+      "Bash(gradle testDebugUnitTest --tests \"top.windyvalley.magicsushi.engine.AnimationEngineTest.frame1 tiles at post-gravity\")",
+      "Bash(gradle assembleDebug)",
+      "Bash(gradle help *)",
+      "Bash(gradle :app:test)",
+      "Bash(gradle :app:compileDebugUnitTestKotlin)"
+    ]
+  }
+}

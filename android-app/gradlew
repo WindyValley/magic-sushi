@@ -1,0 +1,9 @@
+#!/usr/bin/env sh
+#
+# gradlew — Linux/macOS 占位脚本
+# Magic Sushi 使用本地 gradle 命令（环境已配置 8.5+），不依赖此脚本
+# 如需真正的 wrapper，请运行: gradle wrapper --gradle-version 8.5
+
+echo "Magic Sushi: gradlew is a placeholder."
+echo "Use: gradle <task>  (requires local gradle 8.5+)"
+exit 0

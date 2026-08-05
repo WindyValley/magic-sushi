@@ -1,0 +1,46 @@
+# Android 标准 .gitignore
+# 基于 https://github.com/github/gitignore/blob/main/Android.gitignore
+
+# Gradle
+.gradle/
+build/
+local.properties
+**/local.properties
+
+# IntelliJ / Android Studio
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+.navigation/
+captures/
+
+# Keystore
+*.jks
+*.keystore
+
+# NDK
+.cxx/
+
+# Misc
+*.log
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+bin/
+gen/
+out/
+release/
+
+# Mac/Linux 临时
+.DS_Store
+Thumbs.db
+
+# Wrapper（可选保留；本项目保留 wrapper 配置但占位 jar）
+# gradle/wrapper/gradle-wrapper.jar
+
+# Local config
+**/.kotlin/

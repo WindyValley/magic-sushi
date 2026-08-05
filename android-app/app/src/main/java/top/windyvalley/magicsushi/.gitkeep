@@ -1,0 +1,8 @@
+# Magic Sushi — 包目录占位文件
+# 后续任务将在此目录创建：
+#   - MagicSushiApp.kt   (T-ANDROID-002)
+#   - MainActivity.kt    (T-ANDROID-003)
+#   - engine/*.kt        (T-CORE-001 ~ T-CORE-007)
+#   - viewmodel/*.kt     (T-VM-001, T-VM-002)
+#   - ui/**/*.kt         (T-UI-001 ~ T-UI-007)
+#   - data/PrefsRepository.kt (T-DATA-001)
