@@ -211,6 +211,25 @@ class GameViewModel(
      */
     private var swapJob: Job? = null
 
+    /**
+     * 局代际计数。每次 [startGame]（含 [onRestart]）自增。
+     *
+     * ## 为什么需要它
+     *
+     * `onRestart()` 只 cancel 了 `timerJob`，**没有 cancel `swapJob`**。
+     * 于是在 cascade 动画播放期间点「重新开始」会出现：
+     *
+     * 1. `startGame()` 写入全新棋盘，`phase` 重新变成 `PLAYING`
+     * 2. 旧的 swap 协程**还在跑**，它的 `shouldContinue` 守卫检查
+     *    `phase == PLAYING` —— 此刻恰好成立，于是守卫放行
+     * 3. 旧动画继续把旧局的帧写进新局的 state
+     *
+     * 光靠 phase 无法区分「还在本局」和「已经是下一局了」，因为两者的
+     * phase 都是 `PLAYING`。代际计数提供这个区分：swap 协程启动时捕获
+     * 当时的代际，落盘前比对，不一致就放弃写入。
+     */
+    private var roundGeneration = 0L
+
     init {
         // FIX_PLAN D5：把音效的静音判断绑定到 PrefsRepository —— 静音状态的
         // 唯一数据源。SoundPlayer 自己不再存一份，避免 toggleMute 时漏同步。
@@ -254,6 +273,11 @@ class GameViewModel(
         // "倒计时跳秒/超过 60s 重置" Bug B。startTimer() 内部也会 cancel，
         // 但显式 cancel 增加了安全网。
         timerJob?.cancel()
+        // 同时 cancel 在飞的 swap/动画协程：旧局的动画不应继续往新局写帧。
+        // 与 roundGeneration 是双重防线 —— cancel 负责让它停下，代际比对
+        // 负责在「cancel 与协程实际停止之间的窗口」里挡住迟到的写入。
+        swapJob?.cancel()
+        roundGeneration++
         _state.update {
             GameState(
                 board = BoardEngine.generateInitialBoard(),
@@ -466,7 +490,13 @@ class GameViewModel(
      */
     private fun onSwapAttempt(fromRow: Int, fromCol: Int, toRow: Int, toCol: Int) {
         swapJob?.cancel()
+        // 捕获启动时的局代际。若期间发生 restart，落盘前的比对会拦住写入。
+        val myGeneration = roundGeneration
         swapJob = viewModelScope.launch {
+            // 「把本次 swap 终态落盘」的动作。在 try 内算出 cascade 结果后被赋值，
+            // 好让 catch (CancellationException) 分支也能调用它 —— 局部函数的
+            // 作用域限于 try 块内，catch 里看不见，故用 try 外的可空变量持有。
+            var commitFinalState: (() -> Unit)? = null
             try {
                 swapProcessing = true
                 val current = _state.value
@@ -535,13 +565,43 @@ class GameViewModel(
                 // 7. 播放 3-phase 动画（每个 cascade round 各 3 帧）
                 //    时序编排已抽到 engine/CascadeAnimator.kt（FIX_PLAN P1-1）。
                 //    这里只负责把帧写进 GameState，并在 phase 变化时中止。
+                //
+                // 把本次 swap 的最终结果落盘。
+                //
+                // ⚠️ 必须在**正常播完**和**动画被取消**两条路径都调用。
+                // 见下方 CancellationException 分支的注释。
+                //
+                // 代际守卫：期间若发生 restart，本局终态就是过期数据，
+                // 写进去会盖掉新局的棋盘。
+                commitFinalState = {
+                    if (myGeneration == roundGeneration) {
+                        _state.update {
+                            it.copy(
+                                board = cascadeResult.finalBoard,
+                                animFrame = null,
+                                score = it.score + totalScore,
+                                combo = cascadeResult.cascades.size,
+                                remainingSeconds = newRemaining,
+                                selectedTile = null,
+                            )
+                        }
+                    }
+                }
+
                 playCascadeAnimation(
                     startBoard = newBoard,
                     cascades = cascadeResult.cascades,
                     phaseMs = ANIM_PHASE_MS,
                     gapMs = ANIM_GAP_MS,
-                    shouldContinue = { _state.value.phase == GamePhase.PLAYING },
+                    // 守卫同时看 phase 和代际：phase 挡住暂停/结束，
+                    // 代际挡住「restart 后 phase 又变回 PLAYING」这个盲区。
+                    shouldContinue = {
+                        _state.value.phase == GamePhase.PLAYING &&
+                            myGeneration == roundGeneration
+                    },
                     onFrame = { board, frame ->
+                        // 迟到的帧不得写进新局。
+                        if (myGeneration != roundGeneration) return@playCascadeAnimation
                         _state.update {
                             if (board != null) it.copy(board = board, animFrame = frame)
                             else it.copy(animFrame = frame)
@@ -549,21 +609,37 @@ class GameViewModel(
                     },
                 )
 
-                // 动画结束：清除 animFrame，写入最终棋盘
-                _state.update {
-                    it.copy(
-                        board = cascadeResult.finalBoard,
-                        animFrame = null,
-                        score = it.score + totalScore,
-                        combo = cascadeResult.cascades.size,
-                        remainingSeconds = newRemaining,
-                        selectedTile = null,
-                    )
-                }
-
+                // 动画正常结束
+                commitFinalState.invoke()
             } catch (ce: kotlinx.coroutines.CancellationException) {
                 // 协程被取消（onPause / onRestart / VM 清理）是正常控制流，
-                // 必须原样抛出以维持结构化并发；finally 仍会解锁 swapProcessing。
+                // 必须原样抛出以维持结构化并发。
+                //
+                // ⚠️ 但抛之前**必须先把终态落盘** —— 这是真机 bug 的根因：
+                //
+                // playCascadeAnimation 在帧之间 delay()。动画中途暂停时
+                // swapJob.cancel() 让 delay 抛 CancellationException，于是
+                // 上面那句 commitFinalState() 根本不执行。结果 board 停在
+                // 动画开始前的旧值、animFrame 卡在中途某一帧。
+                //
+                // 恢复后 animFrame != null 使 presentation 仍是 Animating，
+                // UI 渲染那个残帧：被消除的格子已空、下落只做了一半，看起来
+                // 就是「空位上方 tile 不下落不补齐」。而手势命中判定走的是
+                // state.board（旧棋盘），与屏幕上的残帧对不上 —— 于是「上方
+                // tile 操作无效」。
+                //
+                // 终态（cascadeResult.finalBoard）是在任何 delay 之前就纯计算
+                // 好的，取消不影响它的正确性，所以这里直接落盘是安全的：
+                // 玩家看到的是「动画跳过，棋盘已结算」，而非状态错乱。
+                // 回归测试见 engine/CascadeCancellationTest.kt。
+                //
+                // 为什么不放在 finally：finally 对 onRestart 也会执行，
+                // 那时新局已经开始，写入旧局终态会污染新棋盘。
+                //
+                // 用 ?.invoke()：取消可能发生在 cascade 算完之前（例如无效
+                // 交换的那 150ms 弹回 delay 期间），那时它还是 null，
+                // 没有终态可落 —— 也确实不需要落。
+                commitFinalState?.invoke()
                 throw ce
             } catch (e: Exception) {
                 // 异常安全：防止未捕获异常导致 swapProcessing 永远为 true，
