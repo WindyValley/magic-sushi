@@ -4,6 +4,95 @@
 
 ---
 
+## 📊 实施结算（2026-08-06 更新）
+
+**18 项中 16 项已完成**，剩 2 项按原计划等需求触发。
+
+测试基线：**111 个全绿，零编译告警**，`--rerun-tasks` 连跑 3 次稳定。
+
+| 项 | 状态 | commit | 备注 |
+|----|------|--------|------|
+| P0-1 swapProcessing 异常安全 | ✅ | `9d041a5` | try/finally |
+| P0-2 SoundPlayer 生命周期 | ✅ | `56325a6` | 依赖提升到 Application |
+| P0-3 动画协程可取消 | ✅ | `9d041a5` | swapJob + phase 守卫 |
+| P1-1 CascadeAnimator 抽出 | ✅ | `9b96698` | **抽出后测试抓到真 bug**，见下 |
+| P1-2 双重重力计算 | ✅ | `54130f1` | 参数不一致，两批不同源结果 |
+| P1-3 GravityEngine 职责分离 | ✅ | `6efaf19` | **删开关而非加参数**，见下 |
+| P1-4 GameCanvas 分支合并 | ✅ | `66a9bb7` | 90 行 → 45 行 |
+| P2-1 MatchEngine 分配优化 | ✅ | `b0eb294` | **落地方案与计划不同**，见下 |
+| P2-2 清理 fun main() | ✅ | `79418fc` | 删 1763 行；先补 ModelsTest 再删 |
+| P2-3 Application DI 入口 | ✅ | `56325a6` | 已由 P0-2 覆盖 |
+| D1 tile id 撞号 | ✅ | `f90480c` | TileIdGenerator 全局递增 |
+| D2 奖励飘字漏播 | ✅ | `68229c7` | GameEvent SharedFlow |
+| D3 Array → List | ✅ | `b0eb294` | 顺带带走 P2-1 |
+| D4 animFrame → BoardPresentation | ✅ | `468dd63` + `6a3957b` | **拆两半做**，见下 |
+| D5 静音三份拷贝 | ✅ | `56325a6` | PrefsRepository 单一数据源 |
+| D6 默认值 RNG | ✅ | `68229c7` | 默认空棋盘 |
+| D7 GameState 拆分 | ⏸️ 暂缓 | — | 现 18 字段；等新玩法触发 |
+| D8 DataStore 迁移 | ⏸️ 暂缓 | — | 等新持久化需求 |
+
+### 与原方案的四处偏差（重要）
+
+按方案照抄会踩空，这几处实际做法与本文档正文不同：
+
+**P2-1 — 目的达成，方案换了**
+
+计划：改传索引器 `(Int) -> SushiTile?`，零中间容器。
+实际：D3 换 `List` 时顺手带走，中间容器**仍保留**：
+
+```kotlin
+val column = List(board.size) { r -> board.grid[r][col] }
+```
+
+这是有意取舍：保留一次 7 元素的短命分配，换 `detectLineMatches` 对横纵
+两轴保持**统一的 `List<SushiTile?>` 消费者**，两轴共用一条代码路径，
+bug 面减半。索引器方案能省这次分配，但多一层间接；7 元素 List 在 JVM 上
+是逃逸分析容易吃掉的短命对象，收益不值那层复杂度。
+
+⚠️ 别照着正文的索引器方案再改一遍 —— 目的已达成。
+
+**P1-3 — 删开关，而非"分离职责"**
+
+排查发现 `doRefill = true` 在生产代码里**已无任何显式调用方**，唯一的
+`true` 来自专测它的测试。但 `CascadeEngine` 靠**默认值**隐式依赖它完成
+cascade 连锁 —— 正因隐式，`grep "doRefill"` 找不到它，差点被当死代码删掉。
+
+结论：直接删掉 `doRefill` 与 `rng` 两个参数，补充改为调用方显式一步。
+详见该节末尾的追加说明。
+
+**P1-1 — 抽出后测试抓到一个真实缺陷**
+
+原实现用 `if (roundIdx < cascades.size - 1) delay(gapMs)` 判断轮间间隙。
+`shouldContinue` 中途返回 false 提前中止时，最后一轮**仍会等一个 gap** ——
+玩家在超时/暂停后感知到画面多停顿 100ms。
+
+修法是把间隙移到**下一轮开头**（`if (roundIdx > 0)`）。
+
+⚠️ **附带行为变化**：单轮 cascade 总时长 600ms → 500ms。去掉的是帧 2
+显示完之后的无视觉内容空等。已真机确认手感正常。
+
+**D4 — 拆成两半，且前半不在原方案里**
+
+原方案只写了 `animFrame` → `BoardPresentation`（类型安全）。实际做了两半：
+
+1. **索引体系收口**（`468dd63`）— 原方案没有这一项。废除 `AnimationEngine`
+   的 `visualId` 负数编号空间，让 `tile.id` 成为全 App 唯一身份。
+   **这一半修掉了用户真机报告的手势错位 bug**（`pointerInput(type)` 捕获
+   过期 row/col，type 仅 5 种取值导致闭包不重建）。
+2. **`BoardPresentation` 密封类型**（`6a3957b`）— 即原方案内容。
+
+先做 1 是因为手势 bug 优先级更高；1 完成后 2 的改造面反而更小。
+
+### 验证方法上的两点经验
+
+- **密封类型要验证真的兑现承诺**：临时注入第三个分支 `data object ProbeOnly`，
+  确认编译器在 `GameCanvas` 两处点名报错，而非只看"编译通过"。探针已撤除。
+- **删代码前先补覆盖**：P2-2 删 `main()` 时发现 `Models.kt` 那 8 条断言
+  **没有任何 JUnit 对应**（其余 7 个引擎都有）。先建 `ModelsTest.kt`
+  迁移跑绿，再删源文件 —— 否则是在删测试覆盖。
+
+---
+
 ## 🔴 P0 — 必须修复（影响游戏稳定性）
 
 ### 1. swapProcessing 无异常安全保护
@@ -138,6 +227,13 @@ for ((roundIdx, cascadeRound) in cascadeResult.cascades.withIndex()) {
 
 ### 4. ViewModel 分解 —— 抽出动画编排器
 
+> ✅ **已完成**（`9b96698`），但**形态与下面不同**：落地为 `engine/CascadeAnimator.kt`
+> 里的 **`suspend` 顶层函数 `playCascadeAnimation`**，不是持有 scope/job 的 class ——
+> 这样时序可用 `runTest` 虚拟时钟精确断言，取消由 suspend 天然传播。
+> ⚠️ 下面示例里的 `if (roundIdx < cascadeResult.cascades.size - 1) delay(gapMs)`
+> **有缺陷**：提前中止时会多等一个 gap。实际实现把间隙移到了下一轮开头。
+> 附带行为变化：单轮 600ms → 500ms。详见文档开头。
+
 **根因**：`GameViewModel` 600 行，同时承担动画编排、业务逻辑、生命周期、音效触发等 7 种职责。动画时序（3 帧 × 100ms delay × N 轮 cascade）硬编码在 `onSwapAttempt` 中，不可测试。
 
 **方案**：抽出 `CascadeAnimator` 类，负责接收 `CascadeResult` 并按时间线推送 `AnimFrame`。
@@ -268,6 +364,11 @@ val frames = AnimationEngine.generateFrames(currentAnimBoard, cascadeRound, fall
 
 ### 6. GravityEngine 与 spawnRefill 职责分离
 
+> ✅ **已完成**（`6efaf19`），但**做法比下面更彻底**：不是"分离职责"，
+> 而是直接**删掉 `doRefill` 与 `rng` 两个参数**。
+> 关键发现：`CascadeEngine` 靠**默认值**隐式依赖它完成 cascade 连锁，
+> `grep "doRefill"` 找不到该调用方，差点被当死代码删除。详见文档开头。
+
 **根因**：`GravityEngine.applyGravity` 的参数 `doRefill: Boolean = true` 让它默认会调用 `BoardEngine.spawnRefill`。gravity 不应该知道 spawn 的存在。
 
 **方案**：移除 `doRefill` 参数，永远只做 gravity。spawnRefill 由调用者显式调用。
@@ -379,6 +480,11 @@ for (slot in tileSlots) {
 
 ### 8. MatchEngine 临时数组分配
 
+> ✅ **已完成**（`b0eb294`，由 D3 换 `List` 时顺手带走）。
+> ⚠️ **下面的索引器方案未被采用，别照着再改一遍。**
+> 实际做法：`Array` → `List`，中间容器保留，理由见文档开头「与原方案的
+> 四处偏差」。`grep "Array(" MatchEngine.kt` 已无结果，目的已达成。
+
 **根因**：列扫描时每次分配 `Array(7){ ... }`，7×7 棋盘上每次 `detectMatches` 有 7 次分配。
 
 **方案**：将 `detectLineMatches` 改为接受 `(Int) -> SushiTile?` 索引器，或直接内联逻辑。
@@ -406,6 +512,12 @@ private fun detectLineMatches(
 ---
 
 ### 9. 清理源文件中残留的 `fun main()` 手动测试
+
+> ✅ **已完成**（`79418fc`）。共删 **1763 行**，8 个引擎文件。
+> ⚠️ 下面「注意」那条真的踩到了：`Models.kt` 的 8 条断言**没有任何 JUnit
+> 对应**（其余 7 个引擎都有）。先新建 `ModelsTest.kt`（6 例）迁移跑绿，
+> 再删源文件。顺带清掉了 `MatchEngine` 的冗余 initializer 告警 ——
+> 那个 `nextId` 本来就在 `main()` 块里。
 
 **根因**：每个 Engine 文件末尾有一个 `fun main()` 手动测试入口，这是早期 TDD 的遗留产物。现在已有完整的 JUnit 测试（`AnimationEngineTest.kt` 等），这些 `main()` 是冗余的。
 
@@ -443,6 +555,8 @@ val factory = GameViewModelFactory(app.prefsRepo, app.soundPlayer)
 ---
 
 ## 实施顺序
+
+> ✅ P0/P1/P2 全部完成。详见文档开头「实施结算」。
 
 | 顺序 | 问题 | 预计工作量 | 影响范围 |
 |------|------|-----------|---------|
@@ -763,6 +877,16 @@ Compose compiler metrics 中 `Board` / `GameState` 不再标记 unstable。
 
 ## 🟡 D4 — `animFrame` 混在 `GameState` 里，状态自相矛盾
 
+> ✅ **已完成**，拆成两半：
+> - `468dd63` **索引体系收口**（原方案没有这一项）—— 废除 `visualId` 负数
+>   编号空间，`tile.id` 成为全 App 唯一身份。**修掉了真机报告的手势错位 bug**。
+> - `6a3957b` **`BoardPresentation` 密封类型** —— 即下面的方案内容。
+>
+> 与下面示例的差异：`presentation` 实现为 `GameState` 的 **computed property**
+> （由 `board` + `animFrame` 派生），`animFrame` 保留为存储形态供 `copy()` 写入，
+> 而非把字段替换掉 —— 这样 VM 侧的写入点不用全改。
+> 已验证密封类型真的生效：注入探针分支后编译器在 `GameCanvas` 两处点名报错。
+
 **根因**：动画期间 `board` 被刻意冻结，视觉真相在 `animFrame` 里，两个字段描述
 同一件事的不同版本：
 
@@ -992,6 +1116,8 @@ data class GameState(
 
 ## 数据层实施顺序
 
+> ✅ D1-D6 全部完成，D7/D8 按原判断暂缓。详见文档开头「实施结算」。
+
 | 顺序 | 问题 | 类型 | 工作量 | 影响文件 |
 |------|------|------|--------|---------|
 | 1 | **D1** tile id 复用 | 🔴 真实 bug | 30 分钟 | 2（+1 新建） |
@@ -1006,6 +1132,20 @@ data class GameState(
 ---
 
 ## 合并后的总实施建议
+
+> ✅ **批次 1-4 全部执行完毕**（2026-08-06）。以下批次划分保留作历史记录，
+> 实际执行情况与偏差见文档开头的「实施结算」。
+>
+> **实际执行顺序与原计划的差异**：
+> - 批次 3 没有一次性做完，而是拆成 `D3 → P1-4 → P1-2 → D4前半 → P1-1 → P1-3`
+>   逐个提交，每项单独跑测试 + 出 APK 真机验证。事后看这个选择是对的：
+>   P1-4 合并渲染分支后**暴露出预存的手势错位 bug**（`pointerInput(type)`
+>   捕获过期坐标），如果六项一起提交，根因定位会困难得多。
+> - 批次 4（清理）挪到了 D4 后半之前做。先清掉 `GameState.kt` 里 131 行
+>   `fun main()`，再改它的结构，改造面更小。
+>
+> **经验**：涉及渲染层/动画的重构，宁可多提交几次、每次出包验证，
+> 也不要攒成一个大 commit —— 真机才能发现的问题需要能二分定位。
 
 原第一部分的 P0/P1/P2 与数据层的 D1-D8 有重叠改动面，按下面批次走可以少改重复代码：
 
