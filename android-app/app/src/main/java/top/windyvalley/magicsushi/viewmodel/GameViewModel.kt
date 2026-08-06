@@ -181,6 +181,14 @@ class GameViewModel(
      */
     private var swapProcessing = false
 
+    /**
+     * The currently-running swap/animation coroutine, if any. Held as a
+     * `Job?` so we can [cancel][Job.cancel] it on pause / restart.
+     * There is only ever one swap at a time — starting a new one first
+     * cancels the old.
+     */
+    private var swapJob: Job? = null
+
     init {
         // Auto-start the game on construction. If you want a manual "Start"
         // button, change this to no-op and gate the timer on a user action.
@@ -239,6 +247,7 @@ class GameViewModel(
     fun onPause() {
         _state.update { it.copy(phase = GamePhase.PAUSED) }
         timerJob?.cancel()
+        swapJob?.cancel()
     }
 
     /**
@@ -415,127 +424,140 @@ class GameViewModel(
      * @param toCol    target col, 0..6
      */
     private fun onSwapAttempt(fromRow: Int, fromCol: Int, toRow: Int, toCol: Int) {
-        viewModelScope.launch {
-            swapProcessing = true
-            val current = _state.value
-            val fromTile = current.board.grid[fromRow][fromCol]!!
-            val toTile = current.board.grid[toRow][toCol]!!
+        swapJob?.cancel()
+        swapJob = viewModelScope.launch {
+            try {
+                swapProcessing = true
+                val current = _state.value
+                val fromTile = current.board.grid[fromRow][fromCol]!!
+                val toTile = current.board.grid[toRow][toCol]!!
 
-            // 1. 尝试交换
-            val (swappedBoard, swapResult) = BoardEngine.attemptSwap(
-                current.board, fromTile, toTile
-            )
-
-            if (swapResult != SwapResult.Success) {
-                // 不相邻或棋盘错误
-                swapProcessing = false
-                return@launch
-            }
-
-            soundPlayer.playSwap()
-
-            // 2. 检测三连
-            val matches = MatchEngine.detectMatches(swappedBoard)
-
-            if (matches.isEmpty()) {
-                // 无效交换：弹回
-                _state.update {
-                    it.copy(
-                        board = swappedBoard,  // 临时显示交换后的状态
-                        selectedTile = null,
-                        isRollback = true,
-                    )
-                }
-                // 短暂延迟后回弹（让 UI 显示弹回动画）
-                delay(150)
-                _state.update {
-                    it.copy(
-                        board = current.board,  // 回弹
-                        isRollback = false,
-                    )
-                }
-                swapProcessing = false
-                return@launch
-            }
-
-            // 3. 有消除 - 计算分数
-            val newBoard = swappedBoard
-            var totalScore = 0
-            var comboCount = 1
-
-            // 4. 连锁
-            val cascadeResult = CascadeEngine.cascadeUntilStable(newBoard, matches)
-            for (cascade in cascadeResult.cascades) {
-                for (match in cascade) {
-                    totalScore += ScoreEngine.scoreForMatch(match, comboCount)
-                }
-                comboCount++
-            }
-
-            // 5. 奖励时间
-            val (newRemaining, reward) = TimerEngine.rewardOnMatch(
-                _state.value.remainingSeconds, cascadeResult.cascades.flatten()
-            )
-
-            // 6. 音效
-            if (cascadeResult.cascades.size > 1) soundPlayer.playCombo()
-            else soundPlayer.playMatch()
-
-            // 7. 播放 3-phase 动画（每个 cascade round 各 3 帧）
-            //    每帧间隔 100 ms，round 之间间隔 100 ms。
-            //
-            //    ⚠️ 关键：每个 cascade round 是在不同的 board 状态上检测到 matches 的。
-            //    Round 0 matches 在 swappedBoard 上检测 → gravity 后 → board1
-            //    Round 1 matches 在 board1 上检测 → gravity 后 → board2
-            //    ...
-            //    如果每次都传 swappedBoard 给 generateFrames，Round 1 的 preFallRow
-            //    会基于 swappedBoard 而不是 board1，导致不该移动的 tile 被算出非零 offsetY。
-            //    所以用 currentAnimBoard 逐轮跟踪：
-            var currentAnimBoard = newBoard
-            for ((roundIdx, cascadeRound) in cascadeResult.cascades.withIndex()) {
-                val frames = AnimationEngine.generateFrames(currentAnimBoard, cascadeRound)
-
-                // 帧 0: Fade Out (0-100ms)
-                _state.update { it.copy(board = currentAnimBoard, animFrame = frames[0]) }
-                delay(ANIM_PHASE_MS)
-
-                // 间歇 1 (100-200ms)
-                delay(ANIM_GAP_MS)
-
-                // 帧 1: Fall (200-300ms)
-                _state.update { it.copy(animFrame = frames[1]) }
-                delay(ANIM_PHASE_MS)
-
-                // 间歇 2 (300-400ms)
-                delay(ANIM_GAP_MS)
-
-                // 帧 2: Spawn In (400-500ms)
-                _state.update { it.copy(animFrame = frames[2]) }
-                delay(ANIM_PHASE_MS)
-
-                // 本 round 重力落地 → 作为下一 round 动画的起始 board
-                currentAnimBoard = GravityEngine.applyGravity(currentAnimBoard, cascadeRound)
-
-                // round 之间有间歇；最后一 round 后不需要额外等待
-                if (roundIdx < cascadeResult.cascades.size - 1) {
-                    delay(ANIM_GAP_MS)
-                }
-            }
-
-            // 动画结束：清除 animFrame，写入最终棋盘
-            _state.update {
-                it.copy(
-                    board = cascadeResult.finalBoard,
-                    animFrame = null,
-                    score = it.score + totalScore,
-                    combo = cascadeResult.cascades.size,
-                    remainingSeconds = newRemaining,
-                    selectedTile = null,
-                    lastRewardSeconds = if (reward > 0) reward else it.lastRewardSeconds,
+                // 1. 尝试交换
+                val (swappedBoard, swapResult) = BoardEngine.attemptSwap(
+                    current.board, fromTile, toTile
                 )
-            }
 
-            swapProcessing = false
+                if (swapResult != SwapResult.Success) {
+                    // 不相邻或棋盘错误
+                    return@launch
+                }
+
+                soundPlayer.playSwap()
+
+                // 2. 检测三连
+                val matches = MatchEngine.detectMatches(swappedBoard)
+
+                if (matches.isEmpty()) {
+                    // 无效交换：弹回
+                    _state.update {
+                        it.copy(
+                            board = swappedBoard,  // 临时显示交换后的状态
+                            selectedTile = null,
+                            isRollback = true,
+                        )
+                    }
+                    // 短暂延迟后回弹（让 UI 显示弹回动画）
+                    delay(150)
+                    _state.update {
+                        it.copy(
+                            board = current.board,  // 回弹
+                            isRollback = false,
+                        )
+                    }
+                    return@launch
+                }
+
+                // 3. 有消除 - 计算分数
+                val newBoard = swappedBoard
+                var totalScore = 0
+                var comboCount = 1
+
+                // 4. 连锁
+                val cascadeResult = CascadeEngine.cascadeUntilStable(newBoard, matches)
+                for (cascade in cascadeResult.cascades) {
+                    for (match in cascade) {
+                        totalScore += ScoreEngine.scoreForMatch(match, comboCount)
+                    }
+                    comboCount++
+                }
+
+                // 5. 奖励时间
+                val (newRemaining, reward) = TimerEngine.rewardOnMatch(
+                    _state.value.remainingSeconds, cascadeResult.cascades.flatten()
+                )
+
+                // 6. 音效
+                if (cascadeResult.cascades.size > 1) soundPlayer.playCombo()
+                else soundPlayer.playMatch()
+
+                // 7. 播放 3-phase 动画（每个 cascade round 各 3 帧）
+                //    每帧间隔 100 ms，round 之间间隔 100 ms。
+                //
+                //    ⚠️ 关键：每个 cascade round 是在不同的 board 状态上检测到 matches 的。
+                //    Round 0 matches 在 swappedBoard 上检测 → gravity 后 → board1
+                //    Round 1 matches 在 board1 上检测 → gravity 后 → board2
+                //    ...
+                //    如果每次都传 swappedBoard 给 generateFrames，Round 1 的 preFallRow
+                //    会基于 swappedBoard 而不是 board1，导致不该移动的 tile 被算出非零 offsetY。
+                //    所以用 currentAnimBoard 逐轮跟踪：
+                var currentAnimBoard = newBoard
+                for ((roundIdx, cascadeRound) in cascadeResult.cascades.withIndex()) {
+                    if (_state.value.phase != GamePhase.PLAYING) break
+
+                    val frames = AnimationEngine.generateFrames(currentAnimBoard, cascadeRound)
+
+                    // 帧 0: Fade Out (0-100ms)
+                    _state.update { it.copy(board = currentAnimBoard, animFrame = frames[0]) }
+                    delay(ANIM_PHASE_MS)
+
+                    // 间歇 1 (100-200ms)
+                    delay(ANIM_GAP_MS)
+
+                    // 帧 1: Fall (200-300ms)
+                    _state.update { it.copy(animFrame = frames[1]) }
+                    delay(ANIM_PHASE_MS)
+
+                    // 间歇 2 (300-400ms)
+                    delay(ANIM_GAP_MS)
+
+                    // 帧 2: Spawn In (400-500ms)
+                    _state.update { it.copy(animFrame = frames[2]) }
+                    delay(ANIM_PHASE_MS)
+
+                    // 本 round 重力落地 → 作为下一 round 动画的起始 board
+                    currentAnimBoard = GravityEngine.applyGravity(currentAnimBoard, cascadeRound)
+
+                    // round 之间有间歇；最后一 round 后不需要额外等待
+                    if (roundIdx < cascadeResult.cascades.size - 1) {
+                        delay(ANIM_GAP_MS)
+                    }
+                }
+
+                // 动画结束：清除 animFrame，写入最终棋盘
+                _state.update {
+                    it.copy(
+                        board = cascadeResult.finalBoard,
+                        animFrame = null,
+                        score = it.score + totalScore,
+                        combo = cascadeResult.cascades.size,
+                        remainingSeconds = newRemaining,
+                        selectedTile = null,
+                        lastRewardSeconds = if (reward > 0) reward else it.lastRewardSeconds,
+                    )
+                }
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                // 协程被取消（onPause / onRestart / VM 清理）是正常控制流，
+                // 必须原样抛出以维持结构化并发；finally 仍会解锁 swapProcessing。
+                throw ce
+            } catch (e: Exception) {
+                // 异常安全：防止未捕获异常导致 swapProcessing 永远为 true，
+                // 进而让棋盘永久不接受输入（游戏冻结）。
+                android.util.Log.e("GameViewModel", "onSwapAttempt failed", e)
+                // 回到一个可继续游玩的干净状态：清掉动画帧与选中态。
+                _state.update { it.copy(animFrame = null, selectedTile = null, isRollback = false) }
+            } finally {
+                swapProcessing = false
+            }
         }
     }
 
