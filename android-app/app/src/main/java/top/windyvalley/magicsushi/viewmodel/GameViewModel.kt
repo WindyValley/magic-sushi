@@ -25,6 +25,7 @@ import top.windyvalley.magicsushi.engine.MatchEngine
 import top.windyvalley.magicsushi.engine.ScoreEngine
 import top.windyvalley.magicsushi.engine.SwapResult
 import top.windyvalley.magicsushi.engine.TimerEngine
+import top.windyvalley.magicsushi.engine.playCascadeAnimation
 
 /**
  * GameViewModel.kt — UI state coordinator for Magic Sushi.
@@ -532,70 +533,21 @@ class GameViewModel(
                 else soundPlayer.playMatch()
 
                 // 7. 播放 3-phase 动画（每个 cascade round 各 3 帧）
-                //    每帧间隔 100 ms，round 之间间隔 100 ms。
-                //
-                //    ⚠️ 关键：每个 cascade round 是在不同的 board 状态上检测到 matches 的。
-                //    Round 0 matches 在 swappedBoard 上检测 → gravity 后 → board1
-                //    Round 1 matches 在 board1 上检测 → gravity 后 → board2
-                //    ...
-                //    如果每次都传 swappedBoard 给 generateFrames，Round 1 的 preFallRow
-                //    会基于 swappedBoard 而不是 board1，导致不该移动的 tile 被算出非零 offsetY。
-                //    所以用 currentAnimBoard 逐轮跟踪：
-                var currentAnimBoard = newBoard
-                for ((roundIdx, cascadeRound) in cascadeResult.cascades.withIndex()) {
-                    if (_state.value.phase != GamePhase.PLAYING) break
-
-                    // FIX_PLAN P1-2：本轮重力只算一次。
-                    // 此前 generateFrames 内部算一次（doRefill=false），这里
-                    // 循环末尾又算一次（默认 doRefill=true，还会多跑 RNG 补
-                    // tile），两份结果不同源。现在算一次、两处共用：动画帧依据
-                    // 的落点与下一轮起始棋盘保证一致。
-                    val fallenBoard = GravityEngine.applyGravity(
-                        currentAnimBoard,
-                        cascadeRound
-                    )
-
-                    // 索引体系收口：本轮的「补充结果」也只算一次。
-                    // 它同时是 SpawnIn 帧里飞入 tile 的真实身份来源，
-                    // 和下一轮动画的起始棋盘 —— 必须同源，否则动画显示的
-                    // 寿司和落定后的寿司会是两个不同的 tile。
-                    val refilledBoard = BoardEngine.spawnRefill(fallenBoard)
-
-                    val frames = AnimationEngine.generateFrames(
-                        currentAnimBoard,
-                        cascadeRound,
-                        fallenBoard = fallenBoard,
-                        refilledBoard = refilledBoard,
-                    )
-
-                    // 帧 0: Fade Out (0-100ms)
-                    _state.update { it.copy(board = currentAnimBoard, animFrame = frames[0]) }
-                    delay(ANIM_PHASE_MS)
-
-                    // 间歇 1 (100-200ms)
-                    delay(ANIM_GAP_MS)
-
-                    // 帧 1: Fall (200-300ms)
-                    _state.update { it.copy(animFrame = frames[1]) }
-                    delay(ANIM_PHASE_MS)
-
-                    // 间歇 2 (300-400ms)
-                    delay(ANIM_GAP_MS)
-
-                    // 帧 2: Spawn In (400-500ms)
-                    _state.update { it.copy(animFrame = frames[2]) }
-                    delay(ANIM_PHASE_MS)
-
-                    // 本 round 补充完毕 → 作为下一 round 动画的起始 board。
-                    // 与上面 SpawnIn 帧用的是同一份 refilledBoard，所以
-                    // 「飞进来的 tile」和「下一轮站在那格的 tile」id 一致。
-                    currentAnimBoard = refilledBoard
-
-                    // round 之间有间歇；最后一 round 后不需要额外等待
-                    if (roundIdx < cascadeResult.cascades.size - 1) {
-                        delay(ANIM_GAP_MS)
-                    }
-                }
+                //    时序编排已抽到 engine/CascadeAnimator.kt（FIX_PLAN P1-1）。
+                //    这里只负责把帧写进 GameState，并在 phase 变化时中止。
+                playCascadeAnimation(
+                    startBoard = newBoard,
+                    cascades = cascadeResult.cascades,
+                    phaseMs = ANIM_PHASE_MS,
+                    gapMs = ANIM_GAP_MS,
+                    shouldContinue = { _state.value.phase == GamePhase.PLAYING },
+                    onFrame = { board, frame ->
+                        _state.update {
+                            if (board != null) it.copy(board = board, animFrame = frame)
+                            else it.copy(animFrame = frame)
+                        }
+                    },
+                )
 
                 // 动画结束：清除 animFrame，写入最终棋盘
                 _state.update {
