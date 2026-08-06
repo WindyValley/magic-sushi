@@ -33,3 +33,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "MagicSushi"
 include(":app")
+// 游戏引擎：纯 Kotlin JVM library，零 Android 依赖（见 engine/build.gradle.kts）
+include(":engine")

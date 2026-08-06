@@ -58,15 +58,14 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
-
-    sourceSets {
-        getByName("test") {
-            java.srcDirs("src/test/engine")
-        }
-    }
 }
 
 dependencies {
+    // 游戏引擎（纯 Kotlin JVM module，零 Android 依赖）。
+    // api 而非 implementation：GameState / Board / SushiType 这些类型
+    // 出现在 ui 与 viewmodel 的公开签名里，消费方需要能看到它们。
+    api(project(":engine"))
+
     // Core AndroidX
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
