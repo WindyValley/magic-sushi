@@ -504,8 +504,8 @@ private fun singleChainBoard(): Board {
     var nextId = 0
     fun fillerAt(r: Int, c: Int): SushiType = filler[(c + r) % 3]
     val b = Board()
-    val newGrid = Array(b.size) { r ->
-        Array<SushiTile?>(b.size) { c ->
+    val newGrid = List(b.size) { r ->
+        List<SushiTile?>(b.size) { c ->
             val t = if (r == 3 && c in 0..2) SushiType.SUSHI1 else fillerAt(r, c)
             SushiTile(id = nextId++, type = t, row = r, col = c)
         }
@@ -542,8 +542,8 @@ private fun multiRoundBoard(): Board {
     var nextId = 0
     fun fillerAt(r: Int, c: Int): SushiType = filler[(c + r) % 3]
     val b = Board()
-    val newGrid = Array(b.size) { r ->
-        Array<SushiTile?>(b.size) { c ->
+    val newGrid = List(b.size) { r ->
+        List<SushiTile?>(b.size) { c ->
             val t = if (c in 0..2 && r in 2..6) SushiType.SUSHI1 else fillerAt(r, c)
             SushiTile(id = nextId++, type = t, row = r, col = c)
         }
@@ -558,8 +558,8 @@ private fun multiRoundBoard(): Board {
 private fun maximallyDenseBoard(): Board {
     var nextId = 0
     val b = Board()
-    val newGrid = Array(b.size) { r ->
-        Array<SushiTile?>(b.size) { c ->
+    val newGrid = List(b.size) { r ->
+        List<SushiTile?>(b.size) { c ->
             SushiTile(id = nextId++, type = SushiType.SUSHI1, row = r, col = c)
         }
     }
@@ -567,14 +567,13 @@ private fun maximallyDenseBoard(): Board {
 }
 
 /**
- * Structural equality check for two [Board]s. Kotlin's data-class
- * `equals` on `Array<Array<SushiTile?>>` is reference-based (Kotlin
- * arrays don't override `equals`), so we have to compare element-wise.
- * For our tests this is sufficient — we only need to verify "same
- * null/non-null pattern + same tile types at same positions".
+ * Structural equality check for two [Board]s, **ignoring tile ids**.
  *
- * Tiles themselves are data classes, so `.type`/`.row`/`.col`/`.id`
- * compare structurally.
+ * D3 之后 `Board.grid` 是 `List<List<SushiTile?>>`，`List.equals` 已是结构
+ * 相等，所以 `a.grid == b.grid` 可用 —— 但那会把 `id` 也算进去。级联过程中
+ * GravityEngine 会 `.copy()` tile 产生新实例，而本函数的语义是"同样的
+ * null/非 null 布局 + 同样位置上同样的类型"，与 id 无关，因此仍需按
+ * (type, row, col) 逐格比较。
  */
 private fun boardsStructurallyEqual(a: Board, b: Board): Boolean {
     if (a.size != b.size) return false

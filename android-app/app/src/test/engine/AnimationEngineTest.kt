@@ -41,7 +41,7 @@ class AnimationEngineTest {
 
     @Test
     fun `generateFrames returns exactly 3 frames for non-empty matches`() {
-        val grid: Array<Array<SushiTile?>> = Array(7) { r -> Array(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r -> List(7) { c ->
             if (r == 3 && c < 3) tile(r, c, SushiType.SUSHI1)
             else tile(r, c, SushiType.SUSHI3)
         }}
@@ -57,7 +57,7 @@ class AnimationEngineTest {
     // ---------------------------------------------------------------------------
     @Test
     fun `frame0 eliminated tiles have alpha 0`() {
-        val grid: Array<Array<SushiTile?>> = Array(7) { r -> Array(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r -> List(7) { c ->
             if (r == 3 && c < 3) tile(r, c, SushiType.SUSHI1) else tile(r, c, SushiType.SUSHI3)
         }}
         val board = Board(size = 7, grid = grid)
@@ -75,7 +75,7 @@ class AnimationEngineTest {
 
     @Test
     fun `frame0 surviving tiles are at full alpha`() {
-        val grid: Array<Array<SushiTile?>> = Array(7) { r -> Array(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r -> List(7) { c ->
             if (r == 3 && c < 3) tile(r, c, SushiType.SUSHI1) else tile(r, c, SushiType.SUSHI3)
         }}
         val board = Board(size = 7, grid = grid)
@@ -116,7 +116,7 @@ class AnimationEngineTest {
         // So the 5 S1s end at rows 1-5. Original row0→row1, row1→row2, ..., row4→row5.
         // Tile from original row0 fell to row1 → distance = 1 → offsetY = 1.
         // Tile from original row4 fell to row5 → distance = 1 → offsetY = 1.
-        val grid: Array<Array<SushiTile?>> = Array(7) { r -> Array(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r -> List(7) { c ->
             if (c == 0 && r < 5) tile(r, c, SushiType.SUSHI1)
             else if (c == 0) tile(r, c, SushiType.SUSHI2)
             else tile(r, c, SushiType.SUSHI3)
@@ -144,7 +144,7 @@ class AnimationEngineTest {
     fun `frame1 tiles that did not move have zero offsetY`() {
         // Use filler board with one tile eliminated in col 0.
         // The S3 tiles in cols 1-6 were never affected → should have offsetY = 0 in frame 1.
-        val grid: Array<Array<SushiTile?>> = Array(7) { r -> Array(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r -> List(7) { c ->
             if (c == 0 && r == 6) tile(r, c, SushiType.SUSHI1)
             else tile(r, c, SushiType.SUSHI3)
         }}
@@ -170,7 +170,7 @@ class AnimationEngineTest {
     // ---------------------------------------------------------------------------
     @Test
     fun `frame2 Stable tiles have zero offsetY`() {
-        val grid: Array<Array<SushiTile?>> = Array(7) { r -> Array(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r -> List(7) { c ->
             if (r == 3 && c < 3) tile(r, c, SushiType.SUSHI1) else tile(r, c, SushiType.SUSHI3)
         }}
         val board = Board(size = 7, grid = grid)
@@ -201,7 +201,7 @@ class AnimationEngineTest {
         // Eliminate entire col 0 (7 tiles). After gravity: col 0 all null.
         // Frame 2 should show spawn-in tiles at rows 0-6.
         // Each spawn-in tile fell DOWN from above → offsetY > 0.
-        val grid: Array<Array<SushiTile?>> = Array(7) { r -> Array(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r -> List(7) { c ->
             if (c == 0) tile(r, c, SushiType.SUSHI1) else tile(r, c, SushiType.SUSHI3)
         }}
         val board = Board(size = 7, grid = grid)
@@ -227,7 +227,7 @@ class AnimationEngineTest {
 
     @Test
     fun `frame2 spawn-in tiles have negative visualId`() {
-        val grid: Array<Array<SushiTile?>> = Array(7) { r -> Array(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r -> List(7) { c ->
             if (c == 0) tile(r, c, SushiType.SUSHI1) else tile(r, c, SushiType.SUSHI3)
         }}
         val board = Board(size = 7, grid = grid)
@@ -250,7 +250,7 @@ class AnimationEngineTest {
     // ---------------------------------------------------------------------------
     @Test
     fun `surviving tile visualId preserved across all 3 frames`() {
-        val grid: Array<Array<SushiTile?>> = Array(7) { r -> Array(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r -> List(7) { c ->
             if (r == 3 && c < 3) tile(r, c, SushiType.SUSHI1) else tile(r, c, SushiType.SUSHI3)
         }}
         val board = Board(size = 7, grid = grid)
@@ -298,8 +298,8 @@ class AnimationEngineTest {
         // After gravity: rows 0 stays null (nothing fell there), rows 1-6 = SUSHI2+SUSHI3.
         // Spawn slots: only row 0 (true top-gap). Row 1 is occupied by the tile that
         // stayed, rows 2-6 are occupied by tiles that fell from above.
-        val grid: Array<Array<SushiTile?>> = Array(7) { r ->
-            Array(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r ->
+            List(7) { c ->
                 if (c == 0) {
                     if (r == 0) tile(r, c, SushiType.SUSHI1)
                     else tile(r, c, SushiType.SUSHI2)
@@ -343,8 +343,8 @@ class AnimationEngineTest {
         // After round 0 gravity, remaining S1s at rows 2..5 create 7 matches (H+V) in round 1.
         val filler = arrayOf(SushiType.SUSHI3, SushiType.SUSHI4, SushiType.SUSHI5)
         var nextId = 0
-        val grid: Array<Array<SushiTile?>> = Array(7) { r ->
-            Array(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r ->
+            List(7) { c ->
                 val t = if (c in 0..2 && r in 2..6) SushiType.SUSHI1 else filler[(c + r) % 3]
                 SushiTile(id = nextId++, type = t, row = r, col = c)
             }
@@ -401,9 +401,9 @@ class AnimationEngineTest {
     fun `each CellKey appears at most once per frame`() {
         val board = BoardEngine.generateInitialBoard(seed = 1L)
         // Force a match by modifying a corner tile
-        val grid = board.grid.map { it.clone() }.toTypedArray()
+        val grid = board.grid.map { it.toMutableList() }
         grid[3][0] = SushiTile(id = 999, type = SushiType.SUSHI1, row = 3, col = 0)
-        val boardWithMatch = board.copy(grid = grid)
+        val boardWithMatch = board.copy(grid = grid.map { it.toList() })
         val matches = MatchEngine.detectMatches(boardWithMatch)
         if (matches.isEmpty()) return // skip if no match formed
 
@@ -427,8 +427,8 @@ class AnimationEngineTest {
         // Let's build a board where this creates a cascade
         val filler = arrayOf(SushiType.SUSHI3, SushiType.SUSHI4, SushiType.SUSHI5)
         var nextId = 0
-        val grid: Array<Array<SushiTile?>> = Array(7) { r ->
-            Array(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r ->
+            List(7) { c ->
                 // Row 2 cols 3-5 = SUSHI1 (the match)
                 // Rows 3-6 cols 3-5 = SUSHI1 (creates cascade after gravity)
                 // Filler elsewhere
@@ -524,8 +524,8 @@ class AnimationEngineTest {
         // Build board: row 2 cols 3-5 = S1 match, rows 3-6 cols 3-5 = S1 cascade block
         val filler = arrayOf(SushiType.SUSHI3, SushiType.SUSHI4, SushiType.SUSHI5)
         var nextId = 0
-        val grid: Array<Array<SushiTile?>> = Array(7) { r ->
-            Array(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r ->
+            List(7) { c ->
                 val t = if (c in 3..5 && r in 2..6) SushiType.SUSHI1 else filler[(c + r) % 3]
                 SushiTile(id = nextId++, type = t, row = r, col = c)
             }
@@ -570,8 +570,8 @@ class AnimationEngineTest {
     fun `Falling offsetY must be positive (tile fell DOWN)`() {
         // Single elimination: col 0 row 5 eliminated
         // Tiles at rows 0-4 fall 1 step → offsetY should be +1 for all
-        val grid: Array<Array<SushiTile?>> = Array(7) { r ->
-            Array(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r ->
+            List(7) { c ->
                 if (c == 0) {
                     if (r == 5) tile(r, c, SushiType.SUSHI1)
                     else tile(r, c, SushiType.SUSHI2)

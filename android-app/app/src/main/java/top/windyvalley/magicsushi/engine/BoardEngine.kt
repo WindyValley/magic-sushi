@@ -79,16 +79,14 @@ object BoardEngine {
         val rng: Random = if (seed != null) Random(seed) else Random.Default
 
         repeat(MAX_RETRIES) {
-            val grid: Array<Array<SushiTile?>> = Array(BOARD_SIZE) { row ->
-                arrayOfNulls<SushiTile>(BOARD_SIZE).also { rowArr ->
-                    for (col in 0 until BOARD_SIZE) {
-                        rowArr[col] = SushiTile(
-                            id = TileIdGenerator.next(),
-                            type = SushiType.entries.random(rng),
-                            row = row,
-                            col = col,
-                        )
-                    }
+            val grid: List<List<SushiTile?>> = List(BOARD_SIZE) { row ->
+                List<SushiTile?>(BOARD_SIZE) { col ->
+                    SushiTile(
+                        id = TileIdGenerator.next(),
+                        type = SushiType.entries.random(rng),
+                        row = row,
+                        col = col,
+                    )
                 }
             }
             val board = Board(grid = grid)
@@ -109,17 +107,15 @@ object BoardEngine {
     private fun fallbackNoMatchBoard(rng: Random): Board {
         val typeA = SushiType.entries.random(rng)
         val typeB = SushiType.entries.first { it != typeA }
-        val grid: Array<Array<SushiTile?>> = Array(BOARD_SIZE) { row ->
-            arrayOfNulls<SushiTile>(BOARD_SIZE).also { rowArr ->
-                for (col in 0 until BOARD_SIZE) {
-                    val type = if ((row + col) % 2 == 0) typeA else typeB
-                    rowArr[col] = SushiTile(
-                        id = TileIdGenerator.next(),
-                        type = type,
-                        row = row,
-                        col = col,
-                    )
-                }
+        val grid: List<List<SushiTile?>> = List(BOARD_SIZE) { row ->
+            List<SushiTile?>(BOARD_SIZE) { col ->
+                val type = if ((row + col) % 2 == 0) typeA else typeB
+                SushiTile(
+                    id = TileIdGenerator.next(),
+                    type = type,
+                    row = row,
+                    col = col,
+                )
             }
         }
         return Board(grid = grid)
@@ -156,18 +152,14 @@ object BoardEngine {
      *              row/col updated to each tile's new position.
      */
     fun spawnRefill(board: Board, rng: Random = Random.Default): Board {
-        val newGrid: Array<Array<SushiTile?>> =
-            Array(board.size) { row -> board.grid[row].clone() }
-        for (row in 0 until board.size) {
-            for (col in 0 until board.size) {
-                if (newGrid[row][col] == null) {
-                    newGrid[row][col] = SushiTile(
-                        id = TileIdGenerator.next(),
-                        type = SushiType.entries.random(rng),
-                        row = row,
-                        col = col,
-                    )
-                }
+        val newGrid: List<List<SushiTile?>> = List(board.size) { row ->
+            List<SushiTile?>(board.size) { col ->
+                board.grid[row][col] ?: SushiTile(
+                    id = TileIdGenerator.next(),
+                    type = SushiType.entries.random(rng),
+                    row = row,
+                    col = col,
+                )
             }
         }
         return board.copy(grid = newGrid)
@@ -225,15 +217,16 @@ object BoardEngine {
         }
 
         // 4. Immutable swap.
-        //    Clone each row (shallow) so we can mutate cells freely, then
-        //    swap two entries. Each moved tile gets its row/col updated via
-        //    .copy() so the tile reflects its new position.
-        val newGrid: Array<Array<SushiTile?>> =
-            Array(board.grid.size) { i -> board.grid[i].clone() }
-        val fromTile = newGrid[from.row][from.col]
-        val toTile = newGrid[to.row][to.col]
-        newGrid[from.row][from.col] = toTile?.copy(row = from.row, col = from.col)
-        newGrid[to.row][to.col] = fromTile?.copy(row = to.row, col = to.col)
+        //    Copy each row into a mutable scratch list so we can swap two
+        //    cells freely, then freeze back to List. Each moved tile gets its
+        //    row/col updated via .copy() so the tile reflects its new position.
+        val scratch: MutableList<MutableList<SushiTile?>> =
+            MutableList(board.grid.size) { i -> board.grid[i].toMutableList() }
+        val fromTile = scratch[from.row][from.col]
+        val toTile = scratch[to.row][to.col]
+        scratch[from.row][from.col] = toTile?.copy(row = from.row, col = from.col)
+        scratch[to.row][to.col] = fromTile?.copy(row = to.row, col = to.col)
+        val newGrid: List<List<SushiTile?>> = scratch.map { it.toList() }
 
         return board.copy(grid = newGrid) to SwapResult.Success
     }
@@ -450,10 +443,14 @@ fun main() {
     val s1 = BoardEngine.generateInitialBoard(seed = 1L)
     val s2 = BoardEngine.generateInitialBoard(seed = 1L)
     val s3 = BoardEngine.generateInitialBoard(seed = 2L)
-    check(s1.grid.contentDeepEquals(s2.grid)) {
-        "same seed must produce structurally equal grids"
+    // List 的 == 是结构相等（D3 改造后不再需要 contentDeepEquals），但 tile id
+    // 由 TileIdGenerator 全局递增分配，两次调用必然不同 —— 所以这里比较的是
+    // **类型布局**，那才是 seed 应当保证的东西（与 BoardEngineTest 一致）。
+    fun typeLayout(b: Board) = b.grid.map { row -> row.map { it?.type } }
+    check(typeLayout(s1) == typeLayout(s2)) {
+        "same seed must produce structurally equal type layouts"
     }
-    check(!s1.grid.contentDeepEquals(s3.grid)) {
+    check(typeLayout(s1) != typeLayout(s3)) {
         "different seeds should produce different boards (probabilistic)"
     }
 

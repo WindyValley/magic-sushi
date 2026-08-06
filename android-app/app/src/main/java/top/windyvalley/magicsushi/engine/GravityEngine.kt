@@ -50,8 +50,9 @@ import kotlin.random.Random
  *
  * ## Mutation discipline
  *
- * - The input [Board] is **never mutated**. `newGrid` is built from
- *   `board.grid.map { it.clone() }` (each inner row is a fresh array) and
+ * - The input [Board] is **never mutated**. `newGrid` is a mutable scratch
+ *   copy built from `board.grid[row].toMutableList()` (each inner row is a
+ *   fresh list) and
  *   every element read from `board.grid` is `.copy()`-ed before being
  *   placed into `newGrid`. The returned `Board` is `board.copy(grid = newGrid)`.
  * - The only exception to the copy discipline is the empty-matches
@@ -104,11 +105,12 @@ object GravityEngine {
         // Fast-path: nothing to do, no allocation, identity return.
         if (eliminatedMatches.isEmpty()) return board
 
-        // Phase 1: deep-clone the grid so we can mutate it without
-        // touching the input board. Each inner row must be a separate
-        // array; `Array<Array<...>>` itself is by-reference per slot.
-        val newGrid: Array<Array<SushiTile?>> =
-            Array(board.size) { row -> board.grid[row].clone() }
+        // Phase 1: deep-copy the grid into a mutable scratch buffer so we can
+        // fill it in place without touching the input board. Each inner row
+        // must be its own MutableList (a shallow copy would alias rows).
+        // 出口处再转回不可变 List（FIX_PLAN D3）。
+        val newGrid: MutableList<MutableList<SushiTile?>> =
+            MutableList(board.size) { row -> board.grid[row].toMutableList() }
 
         // Null-out every eliminated cell. L-shape duplicates overwrite
         // null with null — harmless.
@@ -144,10 +146,12 @@ object GravityEngine {
         // (e.g. AnimationEngine needs to know where the gaps are for SpawnIn frames).
         // CascadeEngine and GameViewModel call spawnRefill explicitly after all
         // cascade rounds are done, so that new tiles can participate in detection.
+        // 冻结为不可变 List（每行也冻结），避免把可变引用泄漏进 Board。
+        val frozenGrid: List<List<SushiTile?>> = newGrid.map { it.toList() }
         return if (doRefill) {
-            BoardEngine.spawnRefill(board.copy(grid = newGrid), rng)
+            BoardEngine.spawnRefill(board.copy(grid = frozenGrid), rng)
         } else {
-            board.copy(grid = newGrid)
+            board.copy(grid = frozenGrid)
         }
     }
 
@@ -213,8 +217,8 @@ fun main() {
     fun boardWith(cellAt: (row: Int, col: Int) -> SushiType?): Board {
         nextId = 0
         val b = Board()
-        val newGrid = Array(b.size) { r ->
-            Array<SushiTile?>(b.size) { c ->
+        val newGrid = List(b.size) { r ->
+            List<SushiTile?>(b.size) { c ->
                 val t = cellAt(r, c)
                 if (t == null) null else SushiTile(id = tileId(), type = t, row = r, col = c)
             }
@@ -674,8 +678,8 @@ fun main() {
             SushiType.SUSHI1, SushiType.SUSHI2, SushiType.SUSHI1, SushiType.SUSHI2,
             SushiType.SUSHI1, SushiType.SUSHI2, SushiType.SUSHI1,
         )
-        val newGrid = Array(b2.size) { r ->
-            Array<SushiTile?>(b2.size) { c ->
+        val newGrid = List(b2.size) { r ->
+            List<SushiTile?>(b2.size) { c ->
                 val t = if (c == 0) altCol0[r] else colTypes[c]
                 SushiTile(id = tileId(), type = t, row = r, col = c)
             }

@@ -32,7 +32,7 @@ class CascadeEngineTest {
         // Row 3 cols 0..2 = SUSHI1; filler everywhere else (FILLER cycle has no 3-in-a-row).
         val filler = arrayOf(SushiType.SUSHI3, SushiType.SUSHI4, SushiType.SUSHI5)
         var nextId = 0
-        val grid: Array<Array<SushiTile?>> = Array(7) { r -> Array<SushiTile?>(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r -> List<SushiTile?>(7) { c ->
             val t = if (r == 3 && c < 3) SushiType.SUSHI1 else filler[(c + r) % 3]
             SushiTile(id = nextId++, type = t, row = r, col = c, isSelected = false, isLocked = false)
         }}
@@ -55,7 +55,7 @@ class CascadeEngineTest {
         val filler = arrayOf(SushiType.SUSHI3, SushiType.SUSHI4, SushiType.SUSHI5)
         repeat(30) { seed ->
             var nextId = 0
-            val grid: Array<Array<SushiTile?>> = Array(7) { r -> Array<SushiTile?>(7) { c ->
+            val grid: List<List<SushiTile?>> = List(7) { r -> List<SushiTile?>(7) { c ->
                 val t = if (r == 3 && c < 3) SushiType.SUSHI1 else filler[(c + r) % 3]
                 SushiTile(id = nextId++, type = t, row = r, col = c, isSelected = false, isLocked = false)
             }}
@@ -102,7 +102,7 @@ class CascadeEngineTest {
         // Row 3 cols 0..2 = SUSHI1; filler everywhere else.
         val filler = arrayOf(SushiType.SUSHI3, SushiType.SUSHI4, SushiType.SUSHI5)
         var nextId = 0
-        val grid: Array<Array<SushiTile?>> = Array(7) { r -> Array<SushiTile?>(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r -> List<SushiTile?>(7) { c ->
             val t = if (r == 3 && c < 3) SushiType.SUSHI1 else filler[(c + r) % 3]
             SushiTile(id = nextId++, type = t, row = r, col = c, isSelected = false, isLocked = false)
         }}
@@ -121,7 +121,7 @@ class CascadeEngineTest {
         // Initial match: H on row 6 cols 0..2 → triggers chain.
         val filler = arrayOf(SushiType.SUSHI3, SushiType.SUSHI4, SushiType.SUSHI5)
         var nextId = 0
-        val grid: Array<Array<SushiTile?>> = Array(7) { r -> Array<SushiTile?>(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r -> List<SushiTile?>(7) { c ->
             val t = if (c in 0..2 && r in 2..6) SushiType.SUSHI1 else filler[(c + r) % 3]
             SushiTile(id = nextId++, type = t, row = r, col = c, isSelected = false, isLocked = false)
         }}
@@ -149,7 +149,7 @@ class CascadeEngineTest {
         val filler = arrayOf(SushiType.SUSHI3, SushiType.SUSHI4, SushiType.SUSHI5)
         var nextId = 0
         fun fillerAt(r: Int, c: Int): SushiType = filler[(c + r) % 3]
-        val grid: Array<Array<SushiTile?>> = Array(7) { r -> Array<SushiTile?>(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r -> List<SushiTile?>(7) { c ->
             val t = if (r == 3 && c < 3) SushiType.SUSHI1 else fillerAt(r, c)
             SushiTile(id = nextId++, type = t, row = r, col = c, isSelected = false, isLocked = false)
         }}

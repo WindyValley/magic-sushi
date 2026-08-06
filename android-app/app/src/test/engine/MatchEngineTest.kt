@@ -20,12 +20,12 @@ class MatchEngineTest {
     private fun tile(row: Int, col: Int, type: SushiType) =
         SushiTile(id = 0, type = type, row = row, col = col, isSelected = false, isLocked = false)
 
-    private fun boardOf(vararg rows: Array<SushiTile?>): Board =
-        Board(size = 7, grid = rows.toList().toTypedArray())
+    private fun boardOf(vararg rows: List<SushiTile?>): Board =
+        Board(size = 7, grid = rows.toList())
 
     @Test
     fun `detectMatches on empty board returns empty list`() {
-        val empty = Board(size = 7, grid = Array(7) { arrayOfNulls<SushiTile>(7) })
+        val empty = Board(size = 7, grid = List(7) { List<SushiTile?>(7) { null } })
         assertTrue(
             "empty board must have no matches",
             MatchEngine.detectMatches(empty).isEmpty(),
@@ -38,7 +38,7 @@ class MatchEngineTest {
         // Use FILLER[(c+r)%3] = [S3,S4,S5] cycle which has no 3-in-a-row anywhere.
         val filler = arrayOf(SushiType.SUSHI3, SushiType.SUSHI4, SushiType.SUSHI5)
         var nextId = 0
-        val grid: Array<Array<SushiTile?>> = Array(7) { r -> Array<SushiTile?>(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r -> List<SushiTile?>(7) { c ->
             val t = if (r == 0 && c < 3) SushiType.SUSHI1 else filler[(c + r) % 3]
             tile(r, c, t).copy(id = nextId++)
         }}
@@ -55,7 +55,7 @@ class MatchEngineTest {
         // Col 0 rows 0..2 = SUSHI1; filler everywhere else.
         val filler = arrayOf(SushiType.SUSHI3, SushiType.SUSHI4, SushiType.SUSHI5)
         var nextId = 0
-        val grid: Array<Array<SushiTile?>> = Array(7) { r -> Array<SushiTile?>(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r -> List<SushiTile?>(7) { c ->
             val t = if (c == 0 && r < 3) SushiType.SUSHI1 else filler[(c + r) % 3]
             tile(r, c, t).copy(id = nextId++)
         }}
@@ -71,7 +71,7 @@ class MatchEngineTest {
         // Row 0 cols 0..3 = SUSHI1; filler everywhere else.
         val filler = arrayOf(SushiType.SUSHI3, SushiType.SUSHI4, SushiType.SUSHI5)
         var nextId = 0
-        val grid: Array<Array<SushiTile?>> = Array(7) { r -> Array<SushiTile?>(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r -> List<SushiTile?>(7) { c ->
             val t = if (r == 0 && c < 4) SushiType.SUSHI1 else filler[(c + r) % 3]
             tile(r, c, t).copy(id = nextId++)
         }}
@@ -88,7 +88,7 @@ class MatchEngineTest {
         // Row 0 cols 0..4 = SUSHI1; filler everywhere else.
         val filler = arrayOf(SushiType.SUSHI3, SushiType.SUSHI4, SushiType.SUSHI5)
         var nextId = 0
-        val grid: Array<Array<SushiTile?>> = Array(7) { r -> Array<SushiTile?>(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r -> List<SushiTile?>(7) { c ->
             val t = if (r == 0 && c < 5) SushiType.SUSHI1 else filler[(c + r) % 3]
             tile(r, c, t).copy(id = nextId++)
         }}
@@ -105,7 +105,7 @@ class MatchEngineTest {
         // Filler cycle has no 3-in-a-row in any row or column.
         val filler = arrayOf(SushiType.SUSHI3, SushiType.SUSHI4, SushiType.SUSHI5)
         var nextId = 0
-        val grid: Array<Array<SushiTile?>> = Array(7) { r -> Array<SushiTile?>(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r -> List<SushiTile?>(7) { c ->
             val t = if (r == c && r < 3) SushiType.SUSHI1 else filler[(c + r) % 3]
             tile(r, c, t).copy(id = nextId++)
         }}
@@ -122,7 +122,7 @@ class MatchEngineTest {
         // Corner (0,0) is shared. Filler everywhere else.
         val filler = arrayOf(SushiType.SUSHI3, SushiType.SUSHI4, SushiType.SUSHI5)
         var nextId = 0
-        val grid: Array<Array<SushiTile?>> = Array(7) { r -> Array<SushiTile?>(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r -> List<SushiTile?>(7) { c ->
             val t = when {
                 r == 0 && c < 3 -> SushiType.SUSHI1
                 c == 0 && r < 3 -> SushiType.SUSHI1
@@ -155,7 +155,7 @@ class MatchEngineTest {
         // then 4 S1s in cols 3..6 form a length-4 match.
         val filler = arrayOf(SushiType.SUSHI3, SushiType.SUSHI4, SushiType.SUSHI5)
         var nextId = 0
-        val grid: Array<Array<SushiTile?>> = Array(7) { r -> Array<SushiTile?>(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r -> List<SushiTile?>(7) { c ->
             val t: SushiType? = when {
                 r == 0 && c < 2 -> SushiType.SUSHI1
                 r == 0 && c >= 3 -> SushiType.SUSHI1

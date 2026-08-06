@@ -108,8 +108,8 @@ class TileIdUniquenessTest {
         // 构造一块确定性棋盘：col 0 的 row 3,4,5 是同类型（将被消除），
         // 其余用周期 3 的填充图案保证不额外触发匹配。
         val filler = listOf(SushiType.SUSHI3, SushiType.SUSHI4, SushiType.SUSHI5)
-        val grid: Array<Array<SushiTile?>> = Array(7) { r ->
-            Array<SushiTile?>(7) { c ->
+        val grid: List<List<SushiTile?>> = List(7) { r ->
+            List<SushiTile?>(7) { c ->
                 val type = if (c == 0 && r in 3..5) {
                     SushiType.SUSHI1
                 } else {
@@ -144,12 +144,12 @@ class TileIdUniquenessTest {
         // 每轮强行把某一列前 3 格改成同类型来触发匹配。
         repeat(20) { round ->
             val col = round % 7
-            val mutable: Array<Array<SushiTile?>> =
-                Array(board.size) { r -> board.grid[r].clone() }
+            val mutable: MutableList<MutableList<SushiTile?>> =
+                MutableList(board.size) { r -> board.grid[r].toMutableList() }
             for (r in 0..2) {
                 mutable[r][col] = mutable[r][col]?.copy(type = SushiType.SUSHI2)
             }
-            board = board.copy(grid = mutable)
+            board = board.copy(grid = mutable.map { it.toList() })
 
             val matches = MatchEngine.detectMatches(board)
             if (matches.isEmpty()) return@repeat

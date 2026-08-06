@@ -69,12 +69,12 @@ object MatchEngine {
         }
 
         // Vertical pass: project each column top-to-bottom into a temporary
-        // array and scan. We rebuild per column (rather than reading column
+        // list and scan. We rebuild per column (rather than reading column
         // by column through board.grid[row][col]) so detectLineMatches
-        // stays a uniform Array<SushiTile?> consumer — the same code path
+        // stays a uniform List<SushiTile?> consumer — the same code path
         // is exercised by both axes, halving the bug surface.
         for (col in 0 until board.size) {
-            val column = Array(board.size) { r -> board.grid[r][col] }
+            val column = List(board.size) { r -> board.grid[r][col] }
             matches += detectLineMatches(column, MatchAxis.VERTICAL)
         }
 
@@ -102,7 +102,7 @@ object MatchEngine {
      * We return `List<Match>` instead and let [detectMatches] flatten.
      */
     private fun detectLineMatches(
-        line: Array<SushiTile?>,
+        line: List<SushiTile?>,
         axis: MatchAxis,
     ): List<Match> {
         if (line.isEmpty()) return emptyList()
@@ -125,7 +125,7 @@ object MatchEngine {
                 // of the loop below), so filterNotNull() is a defensive no-op
                 // that keeps the contract explicit: tiles.size == length.
                 val tiles: List<SushiTile> =
-                    line.copyOfRange(runStart, endExclusive).filterNotNull()
+                    line.subList(runStart, endExclusive).filterNotNull()
                 matches += Match(tiles = tiles, axis = axis, length = tiles.size)
             }
             runStart = -1
@@ -198,8 +198,8 @@ fun main() {
     fun filledBoard(overlay: (row: Int, col: Int) -> SushiType?): Board {
         nextId = 0
         val b = Board()
-        val newGrid = Array(b.size) { r ->
-            Array<SushiTile?>(b.size) { c ->
+        val newGrid = List(b.size) { r ->
+            List<SushiTile?>(b.size) { c ->
                 val t = overlay(r, c) ?: fillerAt(r, c)
                 SushiTile(id = nextId++, type = t, row = r, col = c)
             }
@@ -215,8 +215,8 @@ fun main() {
     fun filledBoardWithNulls(cellAt: (row: Int, col: Int) -> SushiType?): Board {
         nextId = 0
         val b = Board()
-        val newGrid = Array(b.size) { r ->
-            Array<SushiTile?>(b.size) { c ->
+        val newGrid = List(b.size) { r ->
+            List<SushiTile?>(b.size) { c ->
                 val t = cellAt(r, c)
                 if (t == null) null else SushiTile(id = nextId++, type = t, row = r, col = c)
             }

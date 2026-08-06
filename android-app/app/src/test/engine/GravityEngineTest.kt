@@ -46,7 +46,7 @@ class GravityEngineTest {
         //   filterNotNull → [S1, S1, S1, S1, S1, S1] (6 survivors)
         //   nullCount = 1 → prepend 1 null
         // Post-fall col 0: [null, S1, S1, S1, S1, S1, S1]
-        val grid: Array<Array<SushiTile?>> = Array(7) { row -> Array<SushiTile?>(7) { col ->
+        val grid: List<List<SushiTile?>> = List(7) { row -> List<SushiTile?>(7) { col ->
             tile(row, col, SushiType.SUSHI1).copy(id = row * 7 + col)
         }}
         val board = Board(size = 7, grid = grid)
@@ -72,7 +72,7 @@ class GravityEngineTest {
     @Test
     fun `applyGravity full column elimination leaves column all-null`() {
         // Col 0 = SUSHI3 (7 cells), other cols SUSHI4 (no matches).
-        val grid: Array<Array<SushiTile?>> = Array(7) { row -> Array<SushiTile?>(7) { col ->
+        val grid: List<List<SushiTile?>> = List(7) { row -> List<SushiTile?>(7) { col ->
             val t = if (col == 0) SushiType.SUSHI3 else SushiType.SUSHI4
             tile(row, col, t).copy(id = row * 7 + col)
         }}
@@ -100,7 +100,7 @@ class GravityEngineTest {
         // Pre-fall col 1: [S1, S1, S5, S5, S5, S1, S1]
         // After nulling rows 2..4: [S1, S1, null, null, null, S1, S1]
         // After pack-to-bottom: [null, null, null, S1, S1, S1, S1]
-        val grid: Array<Array<SushiTile?>> = Array(7) { row -> Array<SushiTile?>(7) { col ->
+        val grid: List<List<SushiTile?>> = List(7) { row -> List<SushiTile?>(7) { col ->
             when {
                 col == 1 && row in 2..4 -> tile(row, col, SushiType.SUSHI5).copy(id = row * 7 + col)
                 col == 1 -> tile(row, col, SushiType.SUSHI1).copy(id = row * 7 + col)
@@ -124,7 +124,7 @@ class GravityEngineTest {
     fun `applyGravity updates tile row and col fields to new grid position`() {
         // Same setup as the null-distribution test above.
         // Survivors at original rows 0, 1, 5, 6 should end up at rows 3, 4, 5, 6.
-        val grid: Array<Array<SushiTile?>> = Array(7) { row -> Array<SushiTile?>(7) { col ->
+        val grid: List<List<SushiTile?>> = List(7) { row -> List<SushiTile?>(7) { col ->
             when {
                 col == 1 && row in 2..4 -> tile(row, col, SushiType.SUSHI5).copy(id = row * 7 + col)
                 col == 1 -> tile(row, col, SushiType.SUSHI1).copy(id = row * 7 + col)
@@ -184,11 +184,11 @@ class GravityEngineTest {
 
     @Test
     fun `applyGravity does not mutate input board`() {
-        val grid: Array<Array<SushiTile?>> = Array(7) { row -> Array<SushiTile?>(7) { col ->
+        val grid: List<List<SushiTile?>> = List(7) { row -> List<SushiTile?>(7) { col ->
             tile(row, col, SushiType.SUSHI1).copy(id = row * 7 + col)
         }}
         val board = Board(size = 7, grid = grid)
-        val snapshotTypes = Array(7) { r -> Array(7) { c -> board.grid[r][c]?.type } }
+        val snapshotTypes = List(7) { r -> List(7) { c -> board.grid[r][c]?.type } }
 
         val eliminatedTile = board.grid[3][0]!!
         val match = Match(
