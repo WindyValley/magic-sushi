@@ -39,45 +39,53 @@ class AnimationEngineFallenBoardTest {
     }
 
     @Test
-    fun `injecting fallenBoard produces structurally identical frames`() {
+    fun `injecting fallenBoard and refilledBoard produces identical frames`() {
         val board = boardWithRowMatch()
         val matches = MatchEngine.detectMatches(board)
         assertTrue("测试前提：棋盘上应有匹配", matches.isNotEmpty())
 
-        // 不注入 —— generateFrames 内部自己算。
-        val framesInternal = AnimationEngine.generateFrames(board, matches)
-
-        // 注入调用方算好的同一份重力结果。
+        // 一次算好，两处复用 —— 这是 VM 侧的真实调用形态。
         val fallen = GravityEngine.applyGravity(board, matches, doRefill = false)
-        val framesInjected = AnimationEngine.generateFrames(board, matches, fallenBoard = fallen)
+        val refilled = BoardEngine.spawnRefill(fallen)
 
-        assertEquals("帧数必须一致", framesInternal.size, framesInjected.size)
+        val a = AnimationEngine.generateFrames(
+            board, matches, fallenBoard = fallen, refilledBoard = refilled,
+        )
+        val b = AnimationEngine.generateFrames(
+            board, matches, fallenBoard = fallen, refilledBoard = refilled,
+        )
 
-        // ⚠️ 不能整帧 assertEquals。SpawnIn 帧里新 tile 的 type 是
-        // generateFrames 内部用 Random.Default 现场生成的装饰性数据 ——
-        // 与最终棋盘无关。注入路径少跑/多跑一次 applyGravity 会让全局
-        // RNG 序列错位，导致这些装饰类型不同。那不是行为差异。
-        //
-        // 真正需要锁死的是**结构**：每帧覆盖哪些格子、visualId 是什么、
-        // 动画状态和 offsetY 是什么。
-        for (i in framesInternal.indices) {
-            val a = framesInternal[i]
-            val b = framesInjected[i]
-            assertEquals("第 $i 帧覆盖的格子集合必须一致", a.keys, b.keys)
-            for (cell in a.keys) {
-                val sa = a.getValue(cell)
-                val sb = b.getValue(cell)
-                assertEquals("第 $i 帧 $cell 的 visualId", sa.visualId, sb.visualId)
-                assertEquals("第 $i 帧 $cell 的 alpha", sa.alpha, sb.alpha, 0.0001f)
-                assertEquals("第 $i 帧 $cell 的 offsetY", sa.offsetY, sb.offsetY, 0.0001f)
-                assertEquals("第 $i 帧 $cell 的 scale", sa.scale, sb.scale, 0.0001f)
-                assertEquals("第 $i 帧 $cell 的 anim 状态", sa.anim, sb.anim)
-                // 幸存 tile（visualId > 0）的 type 来自真实棋盘，必须一致；
-                // 新生成 tile（visualId < 0）的 type 是随机装饰，跳过。
-                if (sa.visualId > 0) {
-                    assertEquals("第 $i 帧 $cell 的 type（幸存 tile）", sa.type, sb.type)
-                }
-            }
+        // 索引体系收口后，帧内容**完全确定**：spawn tile 的 id 和 type 都
+        // 来自传入的 refilled，不再有 Random.Default 现场编造。
+        // 所以这里可以整帧严格相等 —— 这本身就是收口成功的证据。
+        assertEquals("帧数必须一致", a.size, b.size)
+        for (i in a.indices) {
+            assertEquals("第 $i 帧必须完全一致（无随机成分）", a[i], b[i])
+        }
+    }
+
+    @Test
+    fun `spawn tiles must come from the refilled board, not invented`() {
+        val board = boardWithRowMatch()
+        val matches = MatchEngine.detectMatches(board)
+
+        val fallen = GravityEngine.applyGravity(board, matches, doRefill = false)
+        val refilled = BoardEngine.spawnRefill(fallen)
+        val frames = AnimationEngine.generateFrames(
+            board, matches, fallenBoard = fallen, refilledBoard = refilled,
+        )
+
+        val spawnStates = frames[2].filterValues {
+            it.anim is AnimationEngine.TileAnim.SpawningIn
+        }
+        assertTrue("该场景应有 spawn tile", spawnStates.isNotEmpty())
+
+        for ((cell, state) in spawnStates) {
+            val real = refilled.grid[cell.row][cell.col]
+            assertTrue("refilled[$cell] 必须非空", real != null)
+            assertEquals("$cell 的 id 必须来自 refilled", real!!.id, state.tileId)
+            assertEquals("$cell 的 type 必须来自 refilled", real.type, state.type)
+            assertTrue("身份必须是正数（负数编号空间已废除）", state.tileId > 0)
         }
     }
 
@@ -99,16 +107,18 @@ class AnimationEngineFallenBoardTest {
 
         // 误传补满的棋盘会让 SpawnIn 帧丢失新生成的 tile —— 记录这个差异，
         // 防止后人"顺手"传 doRefill=true 的结果。
-        // 比较 key 集合（确定性），而非整帧（含随机 type）。
+        // 用 anim 类型判定 spawn（负数 id 约定已废除，不能再靠正负号）。
         val framesCorrect =
             AnimationEngine.generateFrames(board, matches, fallenBoard = fallenNoRefill)
         val framesWrong =
             AnimationEngine.generateFrames(board, matches, fallenBoard = fallenRefilled)
 
-        val spawnCellsCorrect = framesCorrect[2].filterValues { it.visualId < 0 }.keys
-        val spawnCellsWrong = framesWrong[2].filterValues { it.visualId < 0 }.keys
+        val spawnCellsCorrect = framesCorrect[2]
+            .filterValues { it.anim is AnimationEngine.TileAnim.SpawningIn }.keys
+        val spawnCellsWrong = framesWrong[2]
+            .filterValues { it.anim is AnimationEngine.TileAnim.SpawningIn }.keys
         assertTrue(
-            "传 doRefill=false 的中间态时，SpawnIn 帧应包含新生成的 tile（visualId<0）",
+            "传 doRefill=false 的中间态时，SpawnIn 帧应包含新生成的 tile",
             spawnCellsCorrect.isNotEmpty(),
         )
         assertTrue(

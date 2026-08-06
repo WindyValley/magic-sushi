@@ -69,9 +69,11 @@ class TileIdUniquenessTest {
     }
 
     @Test
-    fun `next 只产出正数以避开 AnimationEngine 的负 visualId 区间`() {
-        // AnimationEngine 给动画帧里的 spawn tile 分配 -1, -2, ...
-        // 两个区间必须不相交，否则动画帧的 key 会与真实 tile 撞号。
+    fun `next 只产出正数`() {
+        // 历史背景：AnimationEngine 曾给动画帧的 spawn tile 分配 -1, -2, ...
+        // 构成独立编号空间。该约定已废除 —— spawn tile 现在直接用
+        // spawnRefill 产出的真实 tile.id，全 App 只有这一个身份来源。
+        // 保留"只产出正数"这条不变量：0 与负数都不是合法身份。
         repeat(100) {
             assertTrue("id 必须 >= 1", TileIdGenerator.next() >= 1)
         }

@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -121,6 +122,7 @@ private const val CASCADE_ANIM_MS = 100
  */
 @Composable
 fun SushiTile(
+    tileId: Int,
     type: SushiType,
     cellSizePx: Float,
     isSelected: Boolean,
@@ -131,6 +133,19 @@ fun SushiTile(
     onDragStart: () -> Unit = {},
     onDragEnd: (fromOffset: Offset, toOffset: Offset, cellSizePx: Float) -> Unit = { _, _, _ -> },
 ) {
+    // 手势回调必须始终指向"当前这一格"。
+    //
+    // 这些 lambda 由调用方 (GameCanvas) 在每次重组时新建，闭包里捕获了
+    // 该格子的 (row, col)。但 pointerInput 只在它的 key 变化时才重建
+    // 协程作用域 —— 若不做处理，detectTapGestures 里捕获的会是**首次
+    // 组合时**那个 lambda，坐标永久停留在旧值。
+    //
+    // rememberUpdatedState 让长生命周期的手势闭包透过一个稳定的
+    // State 容器读到最新 lambda，这是 Compose 官方针对该场景的解法。
+    val currentOnClick by rememberUpdatedState(onClick)
+    val currentOnDragStart by rememberUpdatedState(onDragStart)
+    val currentOnDragEnd by rememberUpdatedState(onDragEnd)
+
     // Resolve drawable → ImageBitmap. Done unconditionally; Compose caches
     // the bitmaps internally so repeated calls are cheap.
     val imageBitmap: ImageBitmap? = SUSHI_RESOURCES[type]?.let { ImageBitmap.imageResource(it) }
@@ -175,7 +190,9 @@ fun SushiTile(
 
     // Live drag offset (in pixels). Reset to Zero in onDragEnd / onDragCancel
     // so the animateFloatAsState tween smoothly snaps the tile back.
-    var dragOffset by remember(type) { mutableStateOf(Offset.Zero) }
+    // 同样用 tileId 而非 type 作 key：换 tile 时清零拖拽位移，
+    // 但同一个 tile 在重组中要保住进行中的拖拽状态。
+    var dragOffset by remember(tileId) { mutableStateOf(Offset.Zero) }
 
     val animatedOffsetX by animateFloatAsState(
         targetValue = dragOffset.x,
@@ -210,22 +227,23 @@ fun SushiTile(
                 .scale(scale)
                 .alpha(alpha)
                 // Tap path: single-finger tap → onClick.
-                // Keyed by `type` so a tile that gets a new sushi type
-                // (post-swap) rebuilds its gesture detector cleanly.
-                .pointerInput(type) {
+                // key 用 tileId（稳定身份）而非 type：type 只有 5 种取值，
+                // 多轮消除后 tile 换位而 type 恰好不变时，手势作用域不会
+                // 重建 —— 这正是"点到的不是视觉位置那一格"的根因。
+                .pointerInput(tileId) {
                     detectTapGestures(
-                        onTap = { onClick() },
+                        onTap = { currentOnClick() },
                     )
                 }
                 // Drag path: follow finger → onDragStart / onDragEnd.
                 // Separate pointerInput block so tap and drag coexist; the
                 // drag path consumes pointer changes so a successful drag
                 // does not also fire a tap on release.
-                .pointerInput(type) {
+                .pointerInput(tileId) {
                     detectDragGestures(
                         onDragStart = {
                             dragOffset = Offset.Zero
-                            onDragStart()
+                            currentOnDragStart()
                         },
                         onDrag = { change, dragAmount ->
                             change.consume()
@@ -233,7 +251,7 @@ fun SushiTile(
                         },
                         onDragEnd = {
                             // Report the cumulative drag offset, then snap back.
-                            onDragEnd(Offset.Zero, dragOffset, cellSizePx)
+                            currentOnDragEnd(Offset.Zero, dragOffset, cellSizePx)
                             dragOffset = Offset.Zero
                         },
                         onDragCancel = {

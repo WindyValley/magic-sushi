@@ -226,7 +226,7 @@ class AnimationEngineTest {
     }
 
     @Test
-    fun `frame2 spawn-in tiles have negative visualId`() {
+    fun `frame2 spawn-in tiles carry the real refilled tile id and type`() {
         val grid: List<List<SushiTile?>> = List(7) { r -> List(7) { c ->
             if (c == 0) tile(r, c, SushiType.SUSHI1) else tile(r, c, SushiType.SUSHI3)
         }}
@@ -234,22 +234,43 @@ class AnimationEngineTest {
         val allCol0 = (0..6).map { board.grid[it][0]!! }
         val match = Match(tiles = allCol0, axis = MatchAxis.VERTICAL, length = 7)
 
-        val frames = AnimationEngine.generateFrames(board, listOf(match))
+        // 显式传入 refilledBoard，锁死「飞进来的就是落定的那一个」。
+        val fallen = GravityEngine.applyGravity(board, listOf(match), doRefill = false)
+        val refilled = BoardEngine.spawnRefill(fallen)
+        val frames = AnimationEngine.generateFrames(
+            board, listOf(match), fallenBoard = fallen, refilledBoard = refilled,
+        )
         val f2 = frames[2]
 
+        var spawnCount = 0
         for (r in 0..6) {
             val state = f2[AnimationEngine.CellKey(r, 0)]
             if (state != null && state.anim is AnimationEngine.TileAnim.SpawningIn) {
-                assertTrue("spawn-in tile visualId must be negative", state.visualId < 0)
+                spawnCount++
+                val realTile = refilled.grid[r][0]
+                assertTrue("refilled 该格必须有 tile", realTile != null)
+                // 身份收口的核心断言：不再有负数编号空间。
+                assertTrue("tileId 必须是正数真实身份", state.tileId > 0)
+                assertEquals(
+                    "spawn tile 的 id 必须等于 refilled 棋盘上该格的真实 id",
+                    realTile!!.id,
+                    state.tileId,
+                )
+                assertEquals(
+                    "spawn tile 的 type 必须等于落定后的真实 type（此前是随机编的）",
+                    realTile.type,
+                    state.type,
+                )
             }
         }
+        assertTrue("整列被消除，应当有 spawn tile", spawnCount > 0)
     }
 
     // ---------------------------------------------------------------------------
     // VisualId preservation: surviving tile keeps same id across all 3 frames
     // ---------------------------------------------------------------------------
     @Test
-    fun `surviving tile visualId preserved across all 3 frames`() {
+    fun `surviving tile tileId preserved across all 3 frames`() {
         val grid: List<List<SushiTile?>> = List(7) { r -> List(7) { c ->
             if (r == 3 && c < 3) tile(r, c, SushiType.SUSHI1) else tile(r, c, SushiType.SUSHI3)
         }}
@@ -263,20 +284,20 @@ class AnimationEngineTest {
         val frames = AnimationEngine.generateFrames(board, listOf(match))
 
         // For each surviving tile (by original id), it should appear in all 3 frames
-        // with the SAME visualId (even though its position/offsetY changes)
+        // with the SAME tileId (even though its position/offsetY changes)
         for (r in 0..6) for (c in 0..6) {
             val t = board.grid[r][c] ?: continue
             if (t.id in elimIds) continue
 
             val idInFrame = frames.map { f ->
-                f.entries.find { it.value.visualId == t.id }?.value?.visualId
+                f.entries.find { it.value.tileId == t.id }?.value?.tileId
             }
 
             assertNotNull("surviving tile ${t.id} must appear in frame 0", idInFrame[0])
             assertNotNull("surviving tile ${t.id} must appear in frame 1", idInFrame[1])
             assertNotNull("surviving tile ${t.id} must appear in frame 2", idInFrame[2])
-            assertEquals("visualId must be same in frame 0 and 1", idInFrame[0], idInFrame[1])
-            assertEquals("visualId must be same in frame 1 and 2", idInFrame[1], idInFrame[2])
+            assertEquals("tileId must be same in frame 0 and 1", idInFrame[0], idInFrame[1])
+            assertEquals("tileId must be same in frame 1 and 2", idInFrame[1], idInFrame[2])
         }
     }
 
@@ -365,7 +386,7 @@ class AnimationEngineTest {
 
         // All tiles from round 0 elimination: should NOT appear in round 1 frames
         val framesRound1 = AnimationEngine.generateFrames(boardAfterGravity0, round1Matches)
-        val allIdsInRound1Frames = framesRound1.flatMap { it.values.map { s -> s.visualId } }.toSet()
+        val allIdsInRound1Frames = framesRound1.flatMap { it.values.map { s -> s.tileId } }.toSet()
 
         for (id in fallenRound0Ids) {
             assertFalse(
@@ -384,7 +405,7 @@ class AnimationEngineTest {
         val round2Matches = MatchEngine.detectMatches(boardAfterGravity1)
         if (round2Matches.isNotEmpty()) {
             val framesRound2 = AnimationEngine.generateFrames(boardAfterGravity1, round2Matches)
-            val allIdsInRound2Frames = framesRound2.flatMap { it.values.map { s -> s.visualId } }.toSet()
+            val allIdsInRound2Frames = framesRound2.flatMap { it.values.map { s -> s.tileId } }.toSet()
             for (id in round1Eliminated) {
                 assertFalse(
                     "Tile id=${id} eliminated in round 1 must NOT appear in round 2 frames",
@@ -494,9 +515,9 @@ class AnimationEngineTest {
             println("Fall frame entries (cols 3-5 only):")
             val fallEntries = fallFrame.entries.filter { it.key.col in 3..5 }.sortedBy { it.key.row * 10 + it.key.col }
             for ((ck, st) in fallEntries) {
-                val isBug = st.visualId in allEliminatedSoFar
+                val isBug = st.tileId in allEliminatedSoFar
                 val bugMark = if (isBug) " ** BUG: eliminated tile in fall frame **" else ""
-                println("  CellKey(${ck.row},${ck.col}): visualId=${st.visualId} anim=${st.anim} offsetY=${st.offsetY}$bugMark")
+                println("  CellKey(${ck.row},${ck.col}): tileId=${st.tileId} anim=${st.anim} offsetY=${st.offsetY}$bugMark")
             }
 
             // Also show board state at this point
@@ -516,7 +537,7 @@ class AnimationEngineTest {
     }
 
     // ---------------------------------------------------------------------------
-    // INDEPENDENT BUG TEST: Round 1 fall frame visualId duplication
+    // INDEPENDENT BUG TEST: Round 1 fall frame tileId duplication
     // Self-contained: builds board from scratch, no shared state
     // ---------------------------------------------------------------------------
     @Test
@@ -547,8 +568,8 @@ class AnimationEngineTest {
         val frames1 = AnimationEngine.generateFrames(boardAfterGravity0, round1Matches)
         val fallFrame = frames1[1]
 
-        // Assert uniqueness: each visualId must appear exactly once
-        val fallFrameVisualIds = fallFrame.values.map { it.visualId }
+        // Assert uniqueness: each tileId must appear exactly once
+        val fallFrameVisualIds = fallFrame.values.map { it.tileId }
         val uniqueVisualIds = fallFrameVisualIds.toSet()
         println("\n=== Round 1 Fall Frame ===")
         println("  Total entries in fall frame: ${fallFrame.size}")
@@ -558,7 +579,7 @@ class AnimationEngineTest {
             println("  DUPLICATES FOUND: $duplicatesList")
         }
         assertEquals(
-            "Each visualId must appear exactly once in fall frame",
+            "Each tileId must appear exactly once in fall frame",
             fallFrame.size, uniqueVisualIds.size
         )
     }

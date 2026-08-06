@@ -556,10 +556,17 @@ class GameViewModel(
                         doRefill = false,
                     )
 
+                    // 索引体系收口：本轮的「补充结果」也只算一次。
+                    // 它同时是 SpawnIn 帧里飞入 tile 的真实身份来源，
+                    // 和下一轮动画的起始棋盘 —— 必须同源，否则动画显示的
+                    // 寿司和落定后的寿司会是两个不同的 tile。
+                    val refilledBoard = BoardEngine.spawnRefill(fallenBoard)
+
                     val frames = AnimationEngine.generateFrames(
                         currentAnimBoard,
                         cascadeRound,
                         fallenBoard = fallenBoard,
+                        refilledBoard = refilledBoard,
                     )
 
                     // 帧 0: Fade Out (0-100ms)
@@ -580,14 +587,10 @@ class GameViewModel(
                     _state.update { it.copy(animFrame = frames[2]) }
                     delay(ANIM_PHASE_MS)
 
-                    // 本 round 重力落地 → 作为下一 round 动画的起始 board。
-                    //
-                    // ⚠️ 这里必须补齐空格（spawnRefill），不能直接用上面的
-                    // fallenBoard：那份是 doRefill=false 的中间态，顶部留着
-                    // 空洞专门给 SpawnIn 帧用。而下一轮的 matches 是 cascade
-                    // 在「已补齐」的棋盘上检测出来的，起始态必须对齐，否则
-                    // preFallRow 会基于错误的行号算出虚假 offsetY。
-                    currentAnimBoard = BoardEngine.spawnRefill(fallenBoard)
+                    // 本 round 补充完毕 → 作为下一 round 动画的起始 board。
+                    // 与上面 SpawnIn 帧用的是同一份 refilledBoard，所以
+                    // 「飞进来的 tile」和「下一轮站在那格的 tile」id 一致。
+                    currentAnimBoard = refilledBoard
 
                     // round 之间有间歇；最后一 round 后不需要额外等待
                     if (roundIdx < cascadeResult.cascades.size - 1) {

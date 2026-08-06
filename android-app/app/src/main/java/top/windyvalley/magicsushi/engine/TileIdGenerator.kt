@@ -37,8 +37,9 @@ import java.util.concurrent.atomic.AtomicInteger
  * - **线程安全**：`AtomicInteger`。当前引擎在主线程单线程运行，成本可忽略，
  *   但避免了未来把棋盘生成挪到后台线程时的隐患。
  * - **正数区间**：本生成器只产出 **正数**（>= 1）。
- *   [AnimationEngine] 为动画帧里的临时 spawn tile 分配 **负数** visualId
- *   （`-1, -2, ...`），两个区间天然互不冲突。`0` 不被任何一方使用。
+ *   动画帧里的 spawn tile 直接复用 `spawnRefill` 产出的真实 `tile.id`，
+ *   不再有独立的负数编号空间 —— 整个 App 只有这一个身份来源。
+ *   `0` 不被使用，正数即合法身份。
  *
  * ## 溢出
  *

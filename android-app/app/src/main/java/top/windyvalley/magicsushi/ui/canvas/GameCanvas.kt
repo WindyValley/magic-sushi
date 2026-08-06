@@ -189,11 +189,11 @@ fun GameCanvas(
         // 改动时极易只改一边 —— 这正是过去动画相关 bug 反复出现的土壤。
         // ------------------------------------------------------------------
         val slots: List<TileSlot> = if (animFrame != null) {
-            // 动画进行中：tile 身份由 visualId 标识（AnimationEngine 用负数
-            // 表示"即将消失的视觉副本"，与真实 tile id 不冲突）。
+            // 动画进行中：身份来自 renderState.tileId，它就是真实
+            // SushiTile.id（spawn tile 也一样）—— 全 App 单一身份来源。
             animFrame.map { (cellKey, renderState) ->
                 TileSlot(
-                    key = renderState.visualId,
+                    tileId = renderState.tileId,
                     row = cellKey.row,
                     col = cellKey.col,
                     type = renderState.type,
@@ -201,14 +201,14 @@ fun GameCanvas(
                 )
             }
         } else {
-            // 无动画：直接读棋盘，身份就是 tile.id。
+            // 无动画：直接读棋盘，身份同样是 tile.id。
             buildList {
                 for (row in 0 until gridSize) {
                     for (col in 0 until gridSize) {
                         val tile = board.grid[row][col] ?: continue
                         add(
                             TileSlot(
-                                key = tile.id,
+                                tileId = tile.id,
                                 row = row,
                                 col = col,
                                 type = tile.type,
@@ -226,8 +226,9 @@ fun GameCanvas(
             val isSelected = selectedTile == row to col
             val isDragging = draggingTile == row to col
 
-            key(slot.key) {
+            key(slot.tileId) {
                 SushiTile(
+                    tileId = slot.tileId,
                     type = slot.type,
                     cellSizePx = cellSizePx,
                     isSelected = isSelected,
@@ -272,8 +273,9 @@ fun GameCanvas(
  *
  * 把"动画帧"和"静态棋盘"这两种数据来源归一化，使渲染与手势逻辑只需写一份。
  *
- * @property key      Compose `key()` 用的稳定身份。动画中是
- *                    `TileRenderState.visualId`，静态时是 `SushiTile.id`。
+ * @property tileId   Compose `key()` 与手势作用域共用的稳定身份，
+ *                    恒等于 [SushiTile.id]（动画中来自
+ *                    `TileRenderState.tileId`，那也是真实 tile id）。
  *                    **必须全局唯一**，否则 Compose 会复用错误的 slot，
  *                    导致 `remember` 的拖拽偏移与动画状态串格（参见 D1）。
  * @property row      网格行号，用于定位与手势回调。
@@ -282,7 +284,7 @@ fun GameCanvas(
  * @property tileAnim 动画状态；`null` 表示静态渲染（无 cascade 动画）。
  */
 private data class TileSlot(
-    val key: Int,
+    val tileId: Int,
     val row: Int,
     val col: Int,
     val type: SushiType,
