@@ -523,8 +523,8 @@ class GameViewModel(
                     comboCount++
                 }
 
-                // 5. 奖励时间
-                val (newRemaining, reward) = TimerEngine.rewardOnMatch(
+                // 5. 消除后倒计时重置回 60s（与 match 数量无关）
+                val newRemaining = TimerEngine.resetOnMatch(
                     _state.value.remainingSeconds, cascadeResult.cascades.flatten()
                 )
 
@@ -561,12 +561,6 @@ class GameViewModel(
                     )
                 }
 
-                // 时间奖励是一次性信号，走事件流而非 GameState 字段：
-                // 连续两次都奖励 +5s 时字段值不变，LaunchedEffect 不会重启，
-                // 飘字会漏播（FIX_PLAN D2）。SharedFlow 每次 emit 都独立投递。
-                if (reward > 0) {
-                    _events.tryEmit(GameEvent.TimeReward(reward))
-                }
             } catch (ce: kotlinx.coroutines.CancellationException) {
                 // 协程被取消（onPause / onRestart / VM 清理）是正常控制流，
                 // 必须原样抛出以维持结构化并发；finally 仍会解锁 swapProcessing。

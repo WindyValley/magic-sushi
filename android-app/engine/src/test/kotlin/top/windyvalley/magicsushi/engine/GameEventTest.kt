@@ -17,10 +17,15 @@ import org.junit.Test
  *
  * `lastRewardSeconds` 曾是 `GameState` 的字段，UI 侧靠
  * `LaunchedEffect(lastRewardSeconds)` 的 **key 变化** 触发 `+Ns` 飘字。
- * 由于 `+5s` 是本游戏最常见的奖励值，连续两次消除都奖励 5 秒时字段值
+ * 由于 `+5s` 是当时最常见的奖励值，连续两次消除都奖励 5 秒时字段值
  * `5 → 5` 没有变化，`LaunchedEffect` 不会重启，第二次飘字直接不显示。
  *
- * 本测试锁死修复后的不变量：**同值信号连续发射 N 次，消费端必须收到 N 次。**
+ * ⚠️ 奖励时间机制本身已废弃（`TimeReward` 事件与 `RewardOverlay` 已删除，
+ * 消除改为把倒计时重置回 60s）。但**这个教训与具体功能无关** —— 任何
+ * 一次性信号塞进 data class 字段都会踩同一个坑。故测试保留，载体换成
+ * 仍在使用的 [GameEvent.NewRecord]（连续两局同分破纪录是真实场景）。
+ *
+ * 本测试锁死的不变量：**同值信号连续发射 N 次，消费端必须收到 N 次。**
  *
  * 这里直接测 `MutableSharedFlow` 的投递语义（与 VM 中 `_events` 的配置
  * 一致：`replay = 0`、`extraBufferCapacity = 8`），不引入 Android
@@ -38,62 +43,62 @@ class GameEventTest {
     // ------------------------------------------------------------------
 
     @Test
-    fun `连续两次同值 TimeReward 必须产出两个事件`() = runTest {
+    fun `连续两次同值事件必须产出两个事件`() = runTest {
         val events = newEventFlow()
-        val received = mutableListOf<GameEvent.TimeReward>()
+        val received = mutableListOf<GameEvent.NewRecord>()
 
         val job = launch {
-            events.filterIsInstance<GameEvent.TimeReward>().collect { received += it }
+            events.filterIsInstance<GameEvent.NewRecord>().collect { received += it }
         }
         runCurrent()
 
-        // 模拟连续两次消除，都奖励 +5s —— 旧实现在这里丢掉第二次。
-        events.tryEmit(GameEvent.TimeReward(5))
-        events.tryEmit(GameEvent.TimeReward(5))
+        // 同值连续发射 —— 旧的 state 字段实现在这里丢掉第二次。
+        events.tryEmit(GameEvent.NewRecord(1234))
+        events.tryEmit(GameEvent.NewRecord(1234))
         runCurrent()
 
         assertEquals(
-            "同值连续两次奖励必须收到 2 个事件（旧 state 字段实现只会触发 1 次）",
+            "同值连续两次必须收到 2 个事件（旧 state 字段实现只会触发 1 次）",
             2,
             received.size,
         )
-        assertTrue("两个事件都应是 +5s", received.all { it.seconds == 5 })
+        assertTrue("两个事件都应是 1234 分", received.all { it.score == 1234 })
 
         job.cancel()
     }
 
     @Test
-    fun `连续多次同值 TimeReward 全部送达`() = runTest {
+    fun `连续多次同值事件全部送达`() = runTest {
         val events = newEventFlow()
         val received = mutableListOf<Int>()
 
         val job = launch {
-            events.filterIsInstance<GameEvent.TimeReward>().collect { received += it.seconds }
+            events.filterIsInstance<GameEvent.NewRecord>().collect { received += it.score }
         }
         runCurrent()
 
-        repeat(5) { events.tryEmit(GameEvent.TimeReward(5)) }
+        repeat(5) { events.tryEmit(GameEvent.NewRecord(1234)) }
         runCurrent()
 
-        assertEquals("5 次同值发射应收到 5 个事件", listOf(5, 5, 5, 5, 5), received)
+        assertEquals("5 次同值发射应收到 5 个事件", listOf(1234, 1234, 1234, 1234, 1234), received)
 
         job.cancel()
     }
 
     @Test
-    fun `不同值的 TimeReward 按顺序送达`() = runTest {
+    fun `不同值的事件按顺序送达`() = runTest {
         val events = newEventFlow()
         val received = mutableListOf<Int>()
 
         val job = launch {
-            events.filterIsInstance<GameEvent.TimeReward>().collect { received += it.seconds }
+            events.filterIsInstance<GameEvent.NewRecord>().collect { received += it.score }
         }
         runCurrent()
 
-        listOf(5, 5, 10, 5, 3).forEach { events.tryEmit(GameEvent.TimeReward(it)) }
+        listOf(100, 100, 250, 100, 80).forEach { events.tryEmit(GameEvent.NewRecord(it)) }
         runCurrent()
 
-        assertEquals("事件应保序且不去重", listOf(5, 5, 10, 5, 3), received)
+        assertEquals("事件应保序且不去重", listOf(100, 100, 250, 100, 80), received)
 
         job.cancel()
     }
@@ -111,7 +116,7 @@ class GameEventTest {
         repeat(8) { i ->
             assertTrue(
                 "第 ${i + 1} 次 tryEmit 应成功（缓冲区容量 8）",
-                events.tryEmit(GameEvent.TimeReward(5)),
+                events.tryEmit(GameEvent.NewRecord(1234)),
             )
         }
     }
@@ -123,23 +128,23 @@ class GameEventTest {
     @Test
     fun `filterIsInstance 只取关心的事件类型`() = runTest {
         val events = newEventFlow()
-        val rewards = mutableListOf<Int>()
+        val records = mutableListOf<Int>()
 
         val job = launch {
-            events.filterIsInstance<GameEvent.TimeReward>().collect { rewards += it.seconds }
+            events.filterIsInstance<GameEvent.NewRecord>().collect { records += it.score }
         }
         runCurrent()
 
         events.tryEmit(GameEvent.SwapRejected)
-        events.tryEmit(GameEvent.TimeReward(5))
         events.tryEmit(GameEvent.NewRecord(1234))
-        events.tryEmit(GameEvent.TimeReward(5))
+        events.tryEmit(GameEvent.SwapRejected)
+        events.tryEmit(GameEvent.NewRecord(1234))
         runCurrent()
 
         assertEquals(
-            "RewardOverlay 只应收到 TimeReward，且同值两次都收到",
-            listOf(5, 5),
-            rewards,
+            "订阅者只应收到 NewRecord，且同值两次都收到",
+            listOf(1234, 1234),
+            records,
         )
 
         job.cancel()
@@ -172,9 +177,9 @@ class GameEventTest {
     // ------------------------------------------------------------------
 
     @Test
-    fun `TimeReward 是值相等的 data class`() {
-        assertEquals(GameEvent.TimeReward(5), GameEvent.TimeReward(5))
-        assertTrue(GameEvent.TimeReward(5) != GameEvent.TimeReward(10))
+    fun `NewRecord 是值相等的 data class`() {
+        assertEquals(GameEvent.NewRecord(1234), GameEvent.NewRecord(1234))
+        assertTrue(GameEvent.NewRecord(1234) != GameEvent.NewRecord(5678))
     }
 
     @Test

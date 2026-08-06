@@ -7,10 +7,10 @@ import org.junit.Assert.*
  * Unit tests for [TimerEngine].
  *
  * Covers:
- *  - INITIAL_SECONDS / REWARD_SECONDS / MAX_SECONDS constants
+ *  - INITIAL_SECONDS == 60
  *  - initialState() == 60
  *  - tick decrements and floors at 0
- *  - rewardOnMatch adds 5s, caps at MAX_SECONDS, no-op on empty
+ *  - resetOnMatch 重置到 60（与 match 数量无关，高于 60 也拉回），空列表原样返回
  *  - isGameOver checks zero / negative
  */
 class TimerEngineTest {
@@ -21,16 +21,6 @@ class TimerEngineTest {
     @Test
     fun `INITIAL_SECONDS is 60`() {
         assertEquals(60, TimerEngine.INITIAL_SECONDS)
-    }
-
-    @Test
-    fun `REWARD_SECONDS is 5`() {
-        assertEquals(5, TimerEngine.REWARD_SECONDS)
-    }
-
-    @Test
-    fun `MAX_SECONDS is 90`() {
-        assertEquals(90, TimerEngine.MAX_SECONDS)
     }
 
     @Test
@@ -47,51 +37,46 @@ class TimerEngineTest {
     }
 
     @Test
-    fun `rewardOnMatch resets to 60 and returns actual seconds added`() {
-        // v1.0.3: every elimination resets to 60s. If timer was below 60,
-        // the reward is the top-up amount (60 - remaining).
+    fun `resetOnMatch 消除后重置为 60 秒`() {
         val match = Match(
             tiles = (0..2).map { tile(0, it, SushiType.SUSHI1) },
             axis = MatchAxis.HORIZONTAL,
             length = 3,
         )
-        val (newRemaining, reward) = TimerEngine.rewardOnMatch(50, listOf(match))
-        assertEquals(60, newRemaining)
-        assertEquals(10, reward)  // topped up from 50 → 60
+        assertEquals(60, TimerEngine.resetOnMatch(50, listOf(match)))
     }
 
     @Test
-    fun `rewardOnMatch at or above 60 returns 0 reward`() {
-        // v1.0.3: timer resets to 60, but if already at/above 60, no time is added.
+    fun `resetOnMatch 剩余时间高于 60 时同样重置回 60`() {
+        // 旧的加时累加机制可能让 remaining 超过 60（历史 cap 是 90）。
+        // 重置语义不区分方向：无论高于还是低于，一律回到 60。
         val match = Match(
             tiles = (0..2).map { tile(0, it, SushiType.SUSHI1) },
             axis = MatchAxis.HORIZONTAL,
             length = 3,
         )
-        // 88 >= 60 → reset to 60, reward = max(0, 60 - 88) = 0
-        val (newRemaining, reward) = TimerEngine.rewardOnMatch(88, listOf(match))
-        assertEquals(60, newRemaining)
-        assertEquals(0, reward)
+        assertEquals(60, TimerEngine.resetOnMatch(88, listOf(match)))
+        assertEquals(60, TimerEngine.resetOnMatch(90, listOf(match)))
     }
 
     @Test
-    fun `rewardOnMatch above 60 also returns 0 reward`() {
-        // 90 >= 60 → reset to 60, reward = max(0, 60 - 90) = 0
-        val match = Match(
-            tiles = (0..2).map { tile(0, it, SushiType.SUSHI1) },
-            axis = MatchAxis.HORIZONTAL,
-            length = 3,
-        )
-        val (newRemaining, reward) = TimerEngine.rewardOnMatch(90, listOf(match))
-        assertEquals(60, newRemaining)
-        assertEquals(0, reward)
+    fun `resetOnMatch 多个 match 也只重置到 60 不累加`() {
+        // 关键回归点：奖励语义下 N 个 match 会加 N×5 秒。
+        // 重置语义下 match 数量不影响结果 —— 这正是废弃奖励机制的意义。
+        val matches = (0..2).map {
+            Match(
+                tiles = (0..2).map { c -> tile(it, c, SushiType.SUSHI1) },
+                axis = MatchAxis.HORIZONTAL,
+                length = 3,
+            )
+        }
+        assertEquals(60, TimerEngine.resetOnMatch(50, matches))
     }
 
     @Test
-    fun `rewardOnMatch with no matches is no-op (FR-6_9)`() {
-        val (newRemaining, reward) = TimerEngine.rewardOnMatch(50, emptyList())
-        assertEquals(50, newRemaining)
-        assertEquals(0, reward)
+    fun `resetOnMatch 无消除时原样返回 (FR-6_9)`() {
+        assertEquals(50, TimerEngine.resetOnMatch(50, emptyList()))
+        assertEquals(0, TimerEngine.resetOnMatch(0, emptyList()))
     }
 
     @Test

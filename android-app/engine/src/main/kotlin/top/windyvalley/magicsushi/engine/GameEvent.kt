@@ -21,7 +21,7 @@ package top.windyvalley.magicsushi.engine
  * 没有变化，`LaunchedEffect` 不会重启，**信号就丢了**。
  *
  * 真实案例（FIX_PLAN D2）：`lastRewardSeconds` 曾是 `GameState` 的字段，
- * 而 `+5s` 是本游戏最常见的奖励值。连续两次消除都奖励 5 秒时：
+ * 而 `+5s` 是当时最常见的奖励值。连续两次消除都奖励 5 秒时：
  *
  * ```
  * 第一次消除：lastRewardSeconds  null → 5   ✅ 飘字显示
@@ -31,23 +31,19 @@ package top.windyvalley.magicsushi.engine
  * 用 `SharedFlow<GameEvent>` 承载则不存在这个问题 —— 每次 emit 都是一次
  * 独立投递，与值是否相同无关。
  *
+ * （该案例中的奖励时间机制已废弃，`TimeReward` 事件与 `RewardOverlay`
+ * 已删除。但教训适用于任何一次性信号，故保留在此。）
+ *
  * ## 使用约定
  *
  * - VM 侧用 `tryEmit`（配 `extraBufferCapacity`）发射，**不要**用
  *   `emit`：后者在无订阅者时会挂起协程。
  * - UI 侧用 `collect` 消费，配合 `filterIsInstance<T>()` 只取关心的类型。
  * - 事件**不参与状态恢复**：进程重建后历史事件不会重放，这是有意为之
- *   （没人想在旋屏后重看一遍 `+5s` 飘字）。需要跨重建存活的信息属于
+ *   （没人想在旋屏后重看一遍破纪录提示）。需要跨重建存活的信息属于
  *   [GameState]，不属于这里。
  */
 sealed interface GameEvent {
-
-    /**
-     * 消除获得了时间奖励。驱动 `+Ns` 飘字浮层。
-     *
-     * @property seconds 本次奖励的秒数，**保证 > 0**（VM 侧已过滤 0）。
-     */
-    data class TimeReward(val seconds: Int) : GameEvent
 
     /**
      * 交换无效，棋盘即将弹回原位。可用于驱动震动反馈或抖动动画。

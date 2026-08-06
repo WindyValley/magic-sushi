@@ -34,18 +34,21 @@ import kotlinx.coroutines.delay
  *   - 闪烁通过 `LaunchedEffect(remainingSeconds)` 驱动，每次
  *     `remainingSeconds` 进入 1..10 启动一个独立的 `while` 循环
  *     （避免 `LaunchedEffect` 被取消后状态卡住）。
- * - **+Ns 飘字（v1.0.4 移除）**：飘字已从本组件移到 `GameScreen` 顶层的
- *   独立 Box 浮层（`RewardOverlay`），原因：嵌入布局时飘字会撑高
- *   `Column` → 推挤下方棋盘。调用方仍传入 `lastRewardSeconds` 仅是
- *   为了无感升级；本组件不再消费。
  * - **0 秒显示"时间到"**：以灰色 `#666666` 替代数字文字。
  *
  * ## 数据契约
  *
  * - [remainingSeconds]    — 来自 `GameState.remainingSeconds`。
- * - [lastRewardSeconds]   — 来自 `GameState.lastRewardSeconds`。
- *                            v1.0.4 起**不再被本组件消费**，请改用
- *                            `RewardOverlay` 渲染飘字。
+ *
+ * ## 历史：飘字与 lastRewardSeconds 参数已删除
+ *
+ * 本组件曾内嵌 `+Ns` 奖励飘字，后移到 `GameScreen` 顶层的 `RewardOverlay`
+ * 浮层（嵌在这里会撑高 `Column` 推挤棋盘）。迁移时为「无感升级」保留了
+ * 一个 `@Suppress("UNUSED_PARAMETER") lastRewardSeconds` 死参数。
+ *
+ * 现在奖励时间机制整体废弃（消除改为把倒计时重置回 60s），`RewardOverlay`
+ * 与 `GameState.lastRewardSeconds` 均已删除，该死参数一并移除 ——
+ * 调用方本来就没有传它。
  *
  * ## 不依赖
  *
@@ -53,13 +56,11 @@ import kotlinx.coroutines.delay
  * - 不读 `GameViewModel`，由调用方从 `state` 取值传入。
  *
  * @param remainingSeconds    剩余秒数（≥ 0）。0 时显示"时间到"。
- * @param lastRewardSeconds   最近一次消除奖励秒数（v1.0.4 起不再使用，保留仅为兼容）。
  * @param modifier            标准 Compose modifier。
  */
 @Composable
 fun TimerDisplay(
     remainingSeconds: Int,
-    @Suppress("UNUSED_PARAMETER") lastRewardSeconds: Int? = null,
     modifier: Modifier = Modifier,
 ) {
     // ----- 闪烁状态（最后 10 秒） -----

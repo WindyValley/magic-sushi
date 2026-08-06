@@ -56,7 +56,6 @@ import top.windyvalley.magicsushi.viewmodel.GameViewModel
 @Composable
 fun GameScreen(viewModel: GameViewModel) {
     val state by viewModel.state.collectAsState()
-    var showPauseDialog by remember { mutableStateOf(false) }
 
     // 第一次进入：IDLE → PLAYING
     LaunchedEffect(Unit) {
@@ -85,7 +84,7 @@ fun GameScreen(viewModel: GameViewModel) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(
-                    onClick = { showPauseDialog = true },
+                    onClick = { viewModel.onPause() },
                 ) {
                     Text(
                         text = "❚❚",
@@ -123,33 +122,29 @@ fun GameScreen(viewModel: GameViewModel) {
         }
     }
 
-    // 暂停对话框：phase == PAUSED 或显式点击暂停按钮
-    if (showPauseDialog || state.phase == GamePhase.PAUSED) {
+    // 暂停对话框：phase == PAUSED 是唯一判据。
+    //
+    // 修 bug：这里曾是 `showPauseDialog || state.phase == PAUSED`，其中
+    // showPauseDialog 是 GameScreen 的局部 remember 状态，由暂停按钮直接
+    // 置 true —— 但**从不调用 viewModel.onPause()**。结果对话框弹出来了，
+    // VM 里的 timerJob 却照常每秒递减，swapJob 也没取消：看起来暂停了，
+    // 实际没停。phase == PAUSED 那半个条件只对系统级暂停（切后台，
+    // MainActivity 的 ON_PAUSE）生效，所以「两个暂停来源只有一个真暂停」。
+    //
+    // 现在暂停按钮直接调 viewModel.onPause()，phase 成为唯一真相，
+    // 局部状态连同它引发的同步问题一起删除。
+    if (state.phase == GamePhase.PAUSED) {
         PauseDialog(
             currentScore = state.score,
             remainingSeconds = state.remainingSeconds,
-            onResume = {
-                showPauseDialog = false
-                viewModel.onResume()
-            },
-            onRestart = {
-                showPauseDialog = false
-                viewModel.onRestart()
-            },
+            onResume = { viewModel.onResume() },
+            onRestart = { viewModel.onRestart() },
             onQuit = {
-                showPauseDialog = false
                 // 退出 = 重新开始（按用户偏好）
                 viewModel.onRestart()
             },
         )
     }
-
-    // +Ns 飘字顶层浮层（v1.0.4 独立化）—— 在棋盘之上、Dialog 之下
-    // 消费 VM 的一次性事件流而非 state 字段：连续两次同值奖励（如两次 +5s）
-    // 用 state 字段会因"值未变化"漏播飘字（FIX_PLAN D2）。
-    RewardOverlay(
-        events = viewModel.events,
-    )
 
     // 结束对话框
     if (state.phase == GamePhase.GAME_OVER) {
@@ -157,12 +152,7 @@ fun GameScreen(viewModel: GameViewModel) {
             finalScore = state.score,
             highScore = state.highScore,
             isNewRecord = state.isNewRecord,
-            onRestart = {
-                // 修 δ 发现的 bug：如果用户是在 pause dialog 弹出期间被 game over，
-                // 点重玩要同时清掉 showPauseDialog 标志
-                showPauseDialog = false
-                viewModel.onRestart()
-            },
+            onRestart = { viewModel.onRestart() },
         )
     }
 }

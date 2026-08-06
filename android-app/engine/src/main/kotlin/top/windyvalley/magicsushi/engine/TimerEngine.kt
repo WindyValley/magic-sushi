@@ -9,19 +9,28 @@ package top.windyvalley.magicsushi.engine
  * pure functions) so the engine layer stays consistent.
  *
  * ---
- * ## Design (v1.0.3 — 2026-06-21 沐风反馈改)
+ * ## Design
  *
  * - **Initial time:** 60 seconds (FR-6.1).
  * - **Per-tick decrement:** 1 second (driven by the ViewModel's tick loop;
  *   the engine itself does **not** own a coroutine or counter).
- * - **Elimination behavior (v1.0.3):** 每次消除，timer **重置回 [INITIAL_SECONDS] (60s)**。
- *   不要再加时累加，不再有 cap (MAX_SECONDS = 90 在 v1.0.3 不再起作用，保留常量仅为
- *   兼容性 / 文档，不参与计算)。每次消除都是"补满到 60"，让玩家不会因为多次消除而
- *   出现"时间 90+ 越打越久"的体验问题。
+ * - **消除行为：重置回 [INITIAL_SECONDS] (60s)**，见 [resetOnMatch]。
+ *   与 match 数量无关 —— 一个 match 和三个 match 结果相同。
  * - **No-op on no matches:** an invalid swap (`matches` empty) must not
  *   touch the timer (FR-6.9). The ViewModel is expected to check
- *   `matches.isNotEmpty()` before calling, but [rewardOnMatch] is
+ *   `matches.isNotEmpty()` before calling, but [resetOnMatch] is
  *   defensive and also short-circuits on empty input.
+ *
+ * ## 历史：奖励时间机制已废弃
+ *
+ * 早期设计是「每次消除 +5s，上限 90s」（`REWARD_SECONDS` / `MAX_SECONDS`）。
+ * v1.0.3 改为重置语义后，那两个常量与 `rewardOnMatch` 返回的
+ * `(新值, 加了多少秒)` 二元组都成了残留 —— 二元组的第二个值仅用于渲染
+ * "+5s" 飘字。飘字与奖励概念一并废弃，故：
+ *
+ * - `rewardOnMatch` → [resetOnMatch]，返回单个 `Int`
+ * - `REWARD_SECONDS` / `MAX_SECONDS` 删除（删除前唯一使用者是断言其数值的测试）
+ * - `GameEvent.TimeReward` 与 `RewardOverlay` 删除
  *
  * ## Why a stateless `object`?
  *
@@ -36,9 +45,7 @@ package top.windyvalley.magicsushi.engine
  * if (TimerEngine.isGameOver(remaining)) phase = GamePhase.GAME_OVER
  *
  * // After a successful elimination cascade step
- * val (newRemaining, reward) = TimerEngine.rewardOnMatch(remaining, matches)
- * if (reward > 0) showFloatingText("+${reward}s")
- * remaining = newRemaining
+ * remaining = TimerEngine.resetOnMatch(remaining, matches)
  * ```
  *
  * Keeping state in the ViewModel (not here) is what allows the engine to
@@ -49,8 +56,9 @@ package top.windyvalley.magicsushi.engine
  *
  * - `tick(x)` is monotonically non-increasing: `tick(x) <= x` for all `x`.
  * - `tick(x) >= 0` always (clamped via `coerceAtLeast(0)`).
- * - `rewardOnMatch(_, _).first == INITIAL_SECONDS` (v1.0.3 — always reset to 60).
- * - `rewardOnMatch(_, _).second` is in `[0, INITIAL_SECONDS]` (top-up amount).
+ * - `resetOnMatch(x, matches) == INITIAL_SECONDS` when `matches` is non-empty,
+ *   **regardless of `x`** —— 高于 60 也会被拉回 60。
+ * - `resetOnMatch(x, emptyList()) == x`（FR-6.9）。
  * - `isGameOver(x) == true` iff `x <= 0`.
  *
  * @see Models.kt for the data types ([Match]) consumed here.
@@ -63,27 +71,10 @@ object TimerEngine {
 
     /**
      * Starting time at the beginning of a round, in seconds.
+     * 也是每次成功消除后重置回的值（见 [resetOnMatch]）。
      * Source: FR-6.1, ADR-004.
      */
     const val INITIAL_SECONDS: Int = 60
-
-    /**
-     * Seconds added per successful elimination (one +5s per `Match`, not
-     * per tile). Source: FR-6.5 / FR-6.8, ADR-004.
-     */
-    const val REWARD_SECONDS: Int = 5
-
-    /**
-     * Hard cap on the timer — 在 v1.0.3 中**不再使用**（重置回 60 后不会超过 60，
-     * 所以 cap 不会触发）。保留常量仅为：
-     * 1. 兼容已有的单元测试 / 文档引用
-     * 2. 防止未来再切回"+N 秒累加"模式时找不到 MAX 常量
-     * 3. 防御性编程：如果 v1.0.3 之后又改回加时累加，把这里的代码改回去即可
-     *
-     * 当前 [rewardOnMatch] 直接重置到 [INITIAL_SECONDS]，不查 [MAX_SECONDS]。
-     * Source: FR-6.7, ADR-004 (历史)。
-     */
-    const val MAX_SECONDS: Int = 90
 
     // ========================================================================
     // Public API — pure functions
@@ -102,7 +93,7 @@ object TimerEngine {
      * ViewModel is expected to stop ticking once [isGameOver] is true).
      *
      * @param remainingSeconds current timer value, expected `>= 0`
-     * @return `remainingSeconds - 1`, clamped to `[0, MAX_SECONDS]`.
+     * @return `remainingSeconds - 1`, floored at 0.
      *         Returns `0` if input is `0` (does not become `-1`).
      */
     fun tick(remainingSeconds: Int): Int {
@@ -110,41 +101,37 @@ object TimerEngine {
     }
 
     /**
-     * Apply the elimination-reward timer reset for one or more detected matches.
+     * 消除后重置倒计时。
      *
-     * Behavior (v1.0.3 — 沐风 2026-06-21 反馈：每次消除重置回 60s，不要加时累加，不要 cap 90s):
-     * 1. **Empty matches** (FR-6.9): no-op. Returns `(remainingSeconds, 0)` unchanged.
-     * 2. **Otherwise**: reset to [INITIAL_SECONDS] (60). The `second` of the
-     *    returned pair is the *actual* seconds added — typically +X if timer
-     *    was below 60 (we added time back up to 60), or 0 if already at/above 60.
+     * ## 语义：重置，不是奖励
      *
-     * Examples (v1.0.3):
-     * ```
-     * rewardOnMatch(50, listOf(match)) // -> (60, 10) — topped up to 60
-     * rewardOnMatch(88, listOf(match)) // -> (60, 0)  — was already past 60, reset
-     * rewardOnMatch(60, listOf(match)) // -> (60, 0)  — was exactly 60
-     * rewardOnMatch(50, emptyList())   // -> (50, 0)  — no-op (FR-6.9)
-     * ```
+     * 每次成功消除都把倒计时拉回 [INITIAL_SECONDS]，**与 match 数量无关**。
+     * 三个 match 和一个 match 的结果完全相同。
      *
-     * @param remainingSeconds current timer value
-     * @param matches          matches detected in the current step; empty
-     *                         list means no elimination (e.g. invalid swap)
-     * @return `Pair(newRemainingSeconds, actualRewardSeconds)` where
-     *         `newRemainingSeconds == INITIAL_SECONDS` and
-     *         `actualRewardSeconds = max(0, INITIAL_SECONDS - remainingSeconds)`.
+     * 为什么不再叫 `rewardOnMatch`：那个名字承诺「奖励」（增量语义），
+     * 而实际行为是「重置」（绝对语义）。它还返回 `(新值, 增加了多少秒)`
+     * 二元组，那个第二个值只被用来渲染 "+5s" 飘字 —— 飘字连同奖励概念
+     * 一起废弃后，二元组也没有存在理由了。
+     *
+     * 一并删除的历史残留：
+     * - `REWARD_SECONDS = 5`（每次消除加 5 秒）
+     * - `MAX_SECONDS = 90`（加时累加的上限）
+     *
+     * 这两个常量在删除前的唯一使用者是**断言它们等于 5 和 90 的测试**，
+     * 生产代码零引用。自证式测试不产生价值，一并移除。
+     *
+     * @param remainingSeconds 当前剩余秒数
+     * @param matches          本次检测到的消除。空列表 = 无消除（如无效交换），
+     *                         此时原样返回，不碰计时器（FR-6.9）
+     * @return 消除后的剩余秒数：有消除则为 [INITIAL_SECONDS]，否则原值
      */
-    fun rewardOnMatch(
+    fun resetOnMatch(
         remainingSeconds: Int,
         matches: List<Match>,
-    ): Pair<Int, Int> {
-        // FR-6.9: invalid swap (no matches) does not touch the timer.
-        if (matches.isEmpty()) {
-            return remainingSeconds to 0
-        }
-        // v1.0.3: 消除 → 倒计时重置回 60s（每次都是 60s，不累加，无 cap）。
-        val newRemaining = INITIAL_SECONDS
-        val actualReward = (newRemaining - remainingSeconds).coerceAtLeast(0)
-        return newRemaining to actualReward
+    ): Int {
+        // FR-6.9: 无效交换（无消除）不影响计时器。
+        if (matches.isEmpty()) return remainingSeconds
+        return INITIAL_SECONDS
     }
 
     /**
