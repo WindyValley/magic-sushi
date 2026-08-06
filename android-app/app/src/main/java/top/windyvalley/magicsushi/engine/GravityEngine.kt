@@ -99,8 +99,6 @@ object GravityEngine {
     fun applyGravity(
         board: Board,
         eliminatedMatches: List<Match>,
-        doRefill: Boolean = true,
-        rng: Random = Random.Default,
     ): Board {
         // Fast-path: nothing to do, no allocation, identity return.
         if (eliminatedMatches.isEmpty()) return board
@@ -141,18 +139,22 @@ object GravityEngine {
             }
         }
 
-        // Phase 3 (optional): refill every null cell at the top of each column.
-        // Caller sets doRefill=false when they need to inspect the null positions
-        // (e.g. AnimationEngine needs to know where the gaps are for SpawnIn frames).
-        // CascadeEngine and GameViewModel call spawnRefill explicitly after all
-        // cascade rounds are done, so that new tiles can participate in detection.
-        // 冻结为不可变 List（每行也冻结），避免把可变引用泄漏进 Board。
+        // Phase 3: 冻结为不可变 List（每行也冻结），避免把可变引用泄漏进 Board。
+        //
+        // FIX_PLAN P1-3：不再补充空格。
+        //
+        // 此前这里有个 `doRefill: Boolean = true` 开关，默认会顺手调
+        // spawnRefill。问题在于：
+        //   - 函数名承诺的是"施加重力"，补新 tile 是另一件事；
+        //   - 默认 true 意味着调用方不写参数就会**隐式消耗 RNG**，
+        //     P1-2 排查出的双份不同源重力结果正是这么来的；
+        //   - 想看空洞位置的调用方（AnimationEngine 生成 SpawnIn 帧）
+        //     必须记得传 false，忘了就静默拿到补满的棋盘。
+        //
+        // 现在职责单一：applyGravity 只让 tile 下落并留下空洞。
+        // 需要补充的调用方显式调 BoardEngine.spawnRefill。
         val frozenGrid: List<List<SushiTile?>> = newGrid.map { it.toList() }
-        return if (doRefill) {
-            BoardEngine.spawnRefill(board.copy(grid = frozenGrid), rng)
-        } else {
-            board.copy(grid = frozenGrid)
-        }
+        return board.copy(grid = frozenGrid)
     }
 
     /**

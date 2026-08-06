@@ -552,8 +552,7 @@ class GameViewModel(
                     // 的落点与下一轮起始棋盘保证一致。
                     val fallenBoard = GravityEngine.applyGravity(
                         currentAnimBoard,
-                        cascadeRound,
-                        doRefill = false,
+                        cascadeRound
                     )
 
                     // 索引体系收口：本轮的「补充结果」也只算一次。

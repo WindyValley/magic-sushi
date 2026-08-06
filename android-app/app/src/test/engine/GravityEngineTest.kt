@@ -56,7 +56,7 @@ class GravityEngineTest {
             axis = MatchAxis.VERTICAL,
             length = 1,
         )
-        val newBoard = GravityEngine.applyGravity(board, listOf(match), doRefill = false)
+        val newBoard = GravityEngine.applyGravity(board, listOf(match))
 
         // Row 0 col 0 = null (the single null "floats to top" after pack-to-bottom)
         assertNull("row 0 col 0 should be null after pack-to-bottom", newBoard.grid[0][0])
@@ -79,7 +79,7 @@ class GravityEngineTest {
         val board = Board(size = 7, grid = grid)
         val tiles = (0..6).map { board.grid[it][0]!! }
         val match = Match(tiles = tiles, axis = MatchAxis.VERTICAL, length = 7)
-        val newBoard = GravityEngine.applyGravity(board, listOf(match), doRefill = false)
+        val newBoard = GravityEngine.applyGravity(board, listOf(match))
         // Column 0 should be all null (no non-null tiles to fall into it).
         for (row in 0..6) {
             assertNull("col 0 row $row should be null after full V elim", newBoard.grid[row][0])
@@ -110,7 +110,7 @@ class GravityEngineTest {
         val board = Board(size = 7, grid = grid)
         val vTiles = listOf(board.grid[2][1]!!, board.grid[3][1]!!, board.grid[4][1]!!)
         val vMatch = Match(tiles = vTiles, axis = MatchAxis.VERTICAL, length = 3)
-        val newBoard = GravityEngine.applyGravity(board, listOf(vMatch), doRefill = false)
+        val newBoard = GravityEngine.applyGravity(board, listOf(vMatch))
 
         // Col 1 rows 0-2 should be null (3 nulls at top)
         for (r in 0..2) assertNull("col 1 row $r should be null", newBoard.grid[r][1])
@@ -176,7 +176,7 @@ class GravityEngineTest {
             axis = MatchAxis.HORIZONTAL,
             length = 1,
         )
-        val newBoard = GravityEngine.applyGravity(board, listOf(match), doRefill = false)
+        val newBoard = GravityEngine.applyGravity(board, listOf(match))
         assertEquals(7, newBoard.size)
         assertEquals(7, newBoard.grid.size)
         assertTrue("all rows should remain length 7", newBoard.grid.all { it.size == 7 })

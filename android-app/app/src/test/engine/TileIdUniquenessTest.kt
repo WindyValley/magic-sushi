@@ -129,7 +129,7 @@ class TileIdUniquenessTest {
         val eliminated = listOf(grid[3][0]!!, grid[4][0]!!, grid[5][0]!!)
         val match = Match(tiles = eliminated, axis = MatchAxis.VERTICAL, length = 3)
 
-        val fallen = GravityEngine.applyGravity(board, listOf(match), doRefill = false)
+        val fallen = GravityEngine.applyGravity(board, listOf(match))
         assertNoDuplicateIds(fallen, "gravity 之后（未补充）")
 
         val refilled = BoardEngine.spawnRefill(fallen)

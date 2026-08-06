@@ -235,7 +235,7 @@ class AnimationEngineTest {
         val match = Match(tiles = allCol0, axis = MatchAxis.VERTICAL, length = 7)
 
         // 显式传入 refilledBoard，锁死「飞进来的就是落定的那一个」。
-        val fallen = GravityEngine.applyGravity(board, listOf(match), doRefill = false)
+        val fallen = GravityEngine.applyGravity(board, listOf(match))
         val refilled = BoardEngine.spawnRefill(fallen)
         val frames = AnimationEngine.generateFrames(
             board, listOf(match), fallenBoard = fallen, refilledBoard = refilled,
@@ -377,7 +377,7 @@ class AnimationEngineTest {
         val round0Match = Match(tiles = round0Tiles, axis = MatchAxis.HORIZONTAL, length = 3)
 
         // Board after round 0 gravity (no refill — AnimationEngine uses doRefill=false)
-        val boardAfterGravity0 = GravityEngine.applyGravity(board0, listOf(round0Match), doRefill = false)
+        val boardAfterGravity0 = GravityEngine.applyGravity(board0, listOf(round0Match))
         val fallenRound0Ids = round0Tiles.map { it.id }.toSet()
 
         // Round 1: detect on boardAfterGravity0
@@ -398,7 +398,7 @@ class AnimationEngineTest {
         // Round 1 eliminated tiles: should NOT appear in round 2 frames
         // (simulate by using boardAfterGravity0 as board for round 1 animation,
         // then applying gravity to get board for round 2)
-        val boardAfterGravity1 = GravityEngine.applyGravity(boardAfterGravity0, round1Matches, doRefill = false)
+        val boardAfterGravity1 = GravityEngine.applyGravity(boardAfterGravity0, round1Matches)
         val round1Eliminated = round1Matches.flatMap { it.tiles }.map { it.id }.toSet()
 
         // Detect round 2 matches (if any — cascade may stop here)
@@ -475,7 +475,7 @@ class AnimationEngineTest {
 
         println("\n=== Round 0 eliminated: ${round0EliminatedIds} ===")
 
-        val boardAfterGravity0 = GravityEngine.applyGravity(board0, listOf(round0Match), doRefill = false)
+        val boardAfterGravity0 = GravityEngine.applyGravity(board0, listOf(round0Match))
 
         println("\n=== boardAfterGravity0 cols 3-5 ===")
         for (r in 0..6) {
@@ -558,7 +558,7 @@ class AnimationEngineTest {
         val round0Match = Match(tiles = round0Tiles, axis = MatchAxis.HORIZONTAL, length = 3)
 
         // boardAfterGravity0
-        val boardAfterGravity0 = GravityEngine.applyGravity(board0, listOf(round0Match), doRefill = false)
+        val boardAfterGravity0 = GravityEngine.applyGravity(board0, listOf(round0Match))
 
         // Round 1 matches
         val round1Matches = MatchEngine.detectMatches(boardAfterGravity0)

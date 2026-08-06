@@ -180,15 +180,15 @@ object AnimationEngine {
         // Frame 1: Fall
         // ------------------------------------------------------------------
         // Ask GravityEngine where tiles end up after the fall.
-        // doRefill=false: keep null cells visible so we can generate SpawnIn frames.
+        // applyGravity 只落不补，空洞保留下来供 SpawnIn 帧使用（P1-3）。
         //
         // FIX_PLAN P1-2：调用方（GameViewModel 的 cascade 循环）本来也要算一次
         // 同样的重力来推进到下一轮，此前两边各算一次 —— 不仅浪费，更危险的是
-        // 两次调用的参数可能漂移（VM 那次用的是默认 doRefill=true，会额外跑
-        // RNG 补 tile）。现在允许调用方把已算好的结果传进来复用，
+        // 两次调用的参数还可能漂移（VM 那次会额外跑 RNG 补 tile）。
+        // 现在允许调用方把已算好的结果传进来复用，
         // 保证"动画依据的落点"与"下一轮起始棋盘"永远同源。
         val fallen = fallenBoard
-            ?: GravityEngine.applyGravity(board, matches, doRefill = false)
+            ?: GravityEngine.applyGravity(board, matches)
 
         // 索引体系收口：spawn tile 的真实身份来自补充后的棋盘。
         //

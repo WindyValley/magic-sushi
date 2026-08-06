@@ -170,13 +170,17 @@ object CascadeEngine {
         // equivalent to `repeat(MAX_CASCADE_ITERATIONS) { ... }` and
         // makes the iteration bound self-documenting.
         for (i in 0 until MAX_CASCADE_ITERATIONS) {
-            // Step A: fall. We only enter the loop body when
-            // currentMatches is non-empty (we `break` below before
-            // reaching the next iter with an empty list, and the fast
-            // path above handles the very first call). Gravity's own
-            // identity-return fast-path would also handle an empty
-            // input — but we never feed it one.
-            currentBoard = GravityEngine.applyGravity(currentBoard, currentMatches, rng = rng)
+            // Step A: fall, then refill.
+            //
+            // FIX_PLAN P1-3：补充现在是显式的一步。
+            // 此前 applyGravity 的 `doRefill` 默认 true，这里靠隐式行为
+            // 拿到补满的棋盘 —— 契约藏在默认参数里，读这段代码看不出
+            // "新 tile 参与了下一轮检测"这个关键事实。
+            //
+            // 补充必须发生在 detect 之前：新落下的 tile 有资格构成新的
+            // 连线，这正是 cascade 连锁的来源。
+            currentBoard = GravityEngine.applyGravity(currentBoard, currentMatches)
+            currentBoard = BoardEngine.spawnRefill(currentBoard, rng)
 
             // Step B: detect. If no new matches, the chain is over.
             currentMatches = MatchEngine.detectMatches(currentBoard)

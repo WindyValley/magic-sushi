@@ -9,7 +9,7 @@ import kotlin.random.Random
  * FIX_PLAN P1-2 回归测试：`generateFrames` 的 `fallenBoard` 参数注入。
  *
  * 背景：`generateFrames` 内部需要知道「重力落地后各 tile 在哪」，此前它自己
- * 调 `GravityEngine.applyGravity(board, matches, doRefill = false)` 算一次；
+ * 调 `GravityEngine.applyGravity(board, matches)` 算一次；
  * 而 `GameViewModel` 的 cascade 循环末尾为了推进到下一轮，又算了一次
  * （且用的是默认 `doRefill = true`，会额外跑 RNG 补 tile）。
  *
@@ -45,7 +45,7 @@ class AnimationEngineFallenBoardTest {
         assertTrue("测试前提：棋盘上应有匹配", matches.isNotEmpty())
 
         // 一次算好，两处复用 —— 这是 VM 侧的真实调用形态。
-        val fallen = GravityEngine.applyGravity(board, matches, doRefill = false)
+        val fallen = GravityEngine.applyGravity(board, matches)
         val refilled = BoardEngine.spawnRefill(fallen)
 
         val a = AnimationEngine.generateFrames(
@@ -69,7 +69,7 @@ class AnimationEngineFallenBoardTest {
         val board = boardWithRowMatch()
         val matches = MatchEngine.detectMatches(board)
 
-        val fallen = GravityEngine.applyGravity(board, matches, doRefill = false)
+        val fallen = GravityEngine.applyGravity(board, matches)
         val refilled = BoardEngine.spawnRefill(fallen)
         val frames = AnimationEngine.generateFrames(
             board, matches, fallenBoard = fallen, refilledBoard = refilled,
@@ -90,35 +90,33 @@ class AnimationEngineFallenBoardTest {
     }
 
     @Test
-    fun `injected fallenBoard must be the doRefill-false intermediate state`() {
+    fun `applyGravity 只让 tile 下落，不补充空格`() {
         val board = boardWithRowMatch()
         val matches = MatchEngine.detectMatches(board)
 
-        val fallenNoRefill = GravityEngine.applyGravity(board, matches, doRefill = false)
-        val fallenRefilled = GravityEngine.applyGravity(
-            board, matches, doRefill = true, rng = Random(42),
-        )
+        // FIX_PLAN P1-3：applyGravity 的职责单一化后，它永远留下空洞。
+        // 补充是 BoardEngine.spawnRefill 的事，必须由调用方显式发起。
+        val fallen = GravityEngine.applyGravity(board, matches)
+        val refilled = BoardEngine.spawnRefill(fallen, Random(42))
 
-        // doRefill=false 保留空格（给 SpawnIn 帧用）；doRefill=true 补满。
-        val nullsNoRefill = fallenNoRefill.grid.sumOf { row -> row.count { it == null } }
-        val nullsRefilled = fallenRefilled.grid.sumOf { row -> row.count { it == null } }
-        assertTrue("doRefill=false 必须留下空格给 SpawnIn 帧", nullsNoRefill > 0)
-        assertEquals("doRefill=true 必须补满棋盘", 0, nullsRefilled)
+        val nullsAfterGravity = fallen.grid.sumOf { row -> row.count { it == null } }
+        val nullsAfterRefill = refilled.grid.sumOf { row -> row.count { it == null } }
+        assertTrue("applyGravity 必须留下空格给 SpawnIn 帧", nullsAfterGravity > 0)
+        assertEquals("spawnRefill 必须补满棋盘", 0, nullsAfterRefill)
 
-        // 误传补满的棋盘会让 SpawnIn 帧丢失新生成的 tile —— 记录这个差异，
-        // 防止后人"顺手"传 doRefill=true 的结果。
+        // 误把补满的棋盘当 fallenBoard 传进去，SpawnIn 帧就没有新 tile 可飞。
         // 用 anim 类型判定 spawn（负数 id 约定已废除，不能再靠正负号）。
         val framesCorrect =
-            AnimationEngine.generateFrames(board, matches, fallenBoard = fallenNoRefill)
+            AnimationEngine.generateFrames(board, matches, fallenBoard = fallen)
         val framesWrong =
-            AnimationEngine.generateFrames(board, matches, fallenBoard = fallenRefilled)
+            AnimationEngine.generateFrames(board, matches, fallenBoard = refilled)
 
         val spawnCellsCorrect = framesCorrect[2]
             .filterValues { it.anim is AnimationEngine.TileAnim.SpawningIn }.keys
         val spawnCellsWrong = framesWrong[2]
             .filterValues { it.anim is AnimationEngine.TileAnim.SpawningIn }.keys
         assertTrue(
-            "传 doRefill=false 的中间态时，SpawnIn 帧应包含新生成的 tile",
+            "传重力落地后的中间态时，SpawnIn 帧应包含新生成的 tile",
             spawnCellsCorrect.isNotEmpty(),
         )
         assertTrue(
