@@ -509,7 +509,6 @@ class AnimationEngineTest {
             val frames = AnimationEngine.generateFrames(currentAnimBoard, cascadeRound)
             val fallFrame = frames[1]
 
-            val eliminatedThisRound = cascadeRound.flatMap { it.tiles }.map { it.id }.toSet()
             val allEliminatedSoFar = if (roundIdx == 0) round0EliminatedIds else round0EliminatedIds + round1EliminatedIds
 
             println("Fall frame entries (cols 3-5 only):")
