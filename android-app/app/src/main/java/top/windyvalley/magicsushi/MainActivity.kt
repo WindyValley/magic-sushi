@@ -15,8 +15,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.lifecycle.Lifecycle
-import top.windyvalley.magicsushi.audio.SoundPlayer
-import top.windyvalley.magicsushi.data.PrefsRepository
 import top.windyvalley.magicsushi.ui.screen.GameScreen
 import top.windyvalley.magicsushi.ui.theme.MagicSushiTheme
 import top.windyvalley.magicsushi.viewmodel.GameViewModel
@@ -24,11 +22,15 @@ import top.windyvalley.magicsushi.viewmodel.GameViewModelFactory
 
 class MainActivity : ComponentActivity() {
 
-    private val prefsRepo by lazy { PrefsRepository(applicationContext) }
-    private val soundPlayer by lazy { SoundPlayer(applicationContext) }
+    // FIX_PLAN P0-2：依赖来自 Application 作用域，不再由 Activity 创建。
+    // 此前 SoundPlayer 是本类的 by lazy 属性，而 GameViewModel 跨配置变更
+    // 存活 —— 旋屏后旧 Activity 的 onDestroy() 会 release 掉 VM 仍在使用
+    // 的 SoundPool，导致音效永久失效。
+    private val app: MagicSushiApp
+        get() = application as MagicSushiApp
 
     private val viewModel: GameViewModel by viewModels {
-        GameViewModelFactory(prefsRepo, soundPlayer)
+        GameViewModelFactory(app.prefsRepo, app.soundPlayer)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -56,10 +58,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        soundPlayer.release()
-    }
+    // 刻意不再重写 onDestroy() 调用 soundPlayer.release()：
+    // SoundPlayer 现在是 Application 作用域的单例，被多个 Activity 实例
+    // 共享。在此处 release 会让旋屏后存活的 ViewModel 拿到已销毁的
+    // SoundPool（FIX_PLAN P0-2）。其生命周期随进程结束自然回收。
 }
 
 @Composable

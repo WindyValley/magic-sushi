@@ -3,15 +3,22 @@ package top.windyvalley.magicsushi.audio
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.SoundPool
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import top.windyvalley.magicsushi.R
 
 /**
  * 音效播放器（SoundPool 实现）。
  *
  * 4 种音效对应 4 个预加载的 OGG 资源。
- * 支持静音切换。
+ *
+ * ## 静音状态不由本类持有（FIX_PLAN D5）
+ *
+ * 早期版本这里有一份 `_mutedFlow: MutableStateFlow<Boolean>`，于是同一个
+ * "是否静音"被存了三份：`PrefsRepository`（持久化 + Flow）、本类、
+ * `GameState.isMuted`。`toggleMute()` 必须手工同步三处，漏掉任何一处就
+ * 静默不一致。
+ *
+ * 现在改为由外部注入一个读取函数（[bindMutedProvider]），唯一数据源是
+ * `PrefsRepository`。本类只负责"发声"这一件事。
  */
 class SoundPlayer(private val context: Context) {
 
@@ -23,11 +30,25 @@ class SoundPlayer(private val context: Context) {
 
     private var isLoaded = false
 
-    private val _mutedFlow = MutableStateFlow(false)
-    val mutedFlow = _mutedFlow.asStateFlow()
+    /**
+     * 静音状态的读取入口。默认"不静音"，由 `GameViewModel` 在 init 中
+     * 通过 [bindMutedProvider] 绑定到 `PrefsRepository.isMuted()`。
+     *
+     * 用函数而非字段：保证每次播放都读到最新值，不需要任何同步逻辑。
+     */
+    private var mutedProvider: () -> Boolean = { false }
 
     init {
         initialize()
+    }
+
+    /**
+     * 绑定静音状态的数据源。应在应用启动早期调用一次（`GameViewModel.init`）。
+     *
+     * @param provider 返回当前是否静音。通常是 `prefsRepo::isMuted`。
+     */
+    fun bindMutedProvider(provider: () -> Boolean) {
+        mutedProvider = provider
     }
 
     private fun initialize() {
@@ -58,30 +79,24 @@ class SoundPlayer(private val context: Context) {
     }
 
     fun playSwap() {
-        if (_mutedFlow.value || !isLoaded) return
+        if (mutedProvider() || !isLoaded) return
         soundPool?.play(swapId, 1f, 1f, 1, 0, 1f)
     }
 
     fun playMatch() {
-        if (_mutedFlow.value || !isLoaded) return
+        if (mutedProvider() || !isLoaded) return
         soundPool?.play(matchId, 1f, 1f, 1, 0, 1f)
     }
 
     fun playCombo() {
-        if (_mutedFlow.value || !isLoaded) return
+        if (mutedProvider() || !isLoaded) return
         soundPool?.play(comboId, 1f, 1f, 1, 0, 1f)
     }
 
     fun playTick() {
-        if (_mutedFlow.value || !isLoaded) return
+        if (mutedProvider() || !isLoaded) return
         soundPool?.play(tickId, 1f, 1f, 1, 0, 1f)
     }
-
-    fun setMuted(muted: Boolean) {
-        _mutedFlow.value = muted
-    }
-
-    fun isMuted(): Boolean = _mutedFlow.value
 
     fun release() {
         soundPool?.release()

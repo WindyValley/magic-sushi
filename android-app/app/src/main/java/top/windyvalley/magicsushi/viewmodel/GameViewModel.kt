@@ -211,6 +211,25 @@ class GameViewModel(
     private var swapJob: Job? = null
 
     init {
+        // FIX_PLAN D5：把音效的静音判断绑定到 PrefsRepository —— 静音状态的
+        // 唯一数据源。SoundPlayer 自己不再存一份，避免 toggleMute 时漏同步。
+        soundPlayer.bindMutedProvider(prefsRepo::isMuted)
+
+        // FIX_PLAN D5：GameState.isMuted 是 prefs 的**派生投影**（供 UI 渲染
+        // 图标用），靠 collect 保持同步，而不是在 toggleMute 里手工赋值。
+        // 这样即使将来别处调用 prefsRepo.setMuted()，UI 也会自动跟上。
+        viewModelScope.launch {
+            prefsRepo.mutedFlow.collect { muted ->
+                _state.update { it.copy(isMuted = muted) }
+            }
+        }
+        // 同理，最高分也从 prefs 流投影过来。
+        viewModelScope.launch {
+            prefsRepo.highScoreFlow.collect { high ->
+                _state.update { it.copy(highScore = high) }
+            }
+        }
+
         // Auto-start the game on construction. If you want a manual "Start"
         // button, change this to no-op and gate the timer on a user action.
         startGame()
@@ -602,10 +621,10 @@ class GameViewModel(
      * the round state).
      */
     fun toggleMute() {
-        val newMuted = !_state.value.isMuted
-        prefsRepo.setMuted(newMuted)
-        soundPlayer.setMuted(newMuted)
-        _state.update { it.copy(isMuted = newMuted) }
+        // FIX_PLAN D5：只写唯一数据源。SoundPlayer 通过 mutedProvider 实时读取，
+        // GameState.isMuted 由 init 中的 mutedFlow collect 自动投影 ——
+        // 此处不再需要三处手工同步（旧实现漏一处即静默不一致）。
+        prefsRepo.setMuted(!prefsRepo.isMuted())
     }
 
     // ========================================================================
