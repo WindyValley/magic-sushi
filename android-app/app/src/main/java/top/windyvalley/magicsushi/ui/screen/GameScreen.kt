@@ -105,9 +105,8 @@ fun GameScreen(viewModel: GameViewModel) {
 
             // 中间棋盘
             GameCanvas(
-                board = state.board,
+                presentation = state.presentation,
                 selectedTile = state.selectedTile,
-                animFrame = state.animFrame,
                 onTileTap = viewModel::onTileTapped,
                 onDragEnd = viewModel::onDragEnd,
                 modifier = Modifier.fillMaxWidth(),

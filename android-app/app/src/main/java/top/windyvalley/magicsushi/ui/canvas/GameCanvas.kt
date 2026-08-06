@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.LocalDensity
 import top.windyvalley.magicsushi.engine.AnimFrame
 import top.windyvalley.magicsushi.engine.AnimationEngine
 import top.windyvalley.magicsushi.engine.Board
+import top.windyvalley.magicsushi.engine.BoardPresentation
 import top.windyvalley.magicsushi.engine.SushiType
 import kotlin.math.abs
 
@@ -83,7 +84,10 @@ private const val DragThresholdRatio = 0.3f
  *   - The actual game logic (swap, match, cascade) stays in the
  *     ViewModel and is triggered via [onTileTap] / [onDragEnd].
  *
- * @param board         current board state (cells may be `null` for empty)
+ * @param presentation  棋盘渲染态。`Stable` 直接画棋盘，`Animating` 画动画帧。
+ *                      取代早期的 `(board, animFrame?)` 双入参 —— 那对字段
+ *                      隐式互斥，靠"animFrame 非空则忽略 board"的注释约定
+ *                      维持正确性（FIX_PLAN D4）。
  * @param selectedTile  the `(row, col)` currently selected, or `null`
  * @param onTileTap     callback invoked with `(row, col)` on a tap, or when
  *                      a drag ends below [DragThresholdRatio]
@@ -97,14 +101,18 @@ private const val DragThresholdRatio = 0.3f
  */
 @Composable
 fun GameCanvas(
-    board: Board,
+    presentation: BoardPresentation,
     selectedTile: Pair<Int, Int>?,
-    animFrame: AnimFrame? = null,
     modifier: Modifier = Modifier,
     onTileTap: (row: Int, col: Int) -> Unit = { _, _ -> },
     onDragEnd: (fromRow: Int, fromCol: Int, toRow: Int, toCol: Int) -> Unit = { _, _, _, _ -> },
 ) {
-    val gridSize = board.size
+    // 逻辑棋盘：只用于取尺寸与手势命中，绝不用于绘制（见 BoardPresentation 文档）。
+    val logicalBoard = when (presentation) {
+        is BoardPresentation.Stable -> presentation.board
+        is BoardPresentation.Animating -> presentation.logicalBoard
+    }
+    val gridSize = logicalBoard.size
 
     // Local UI state: which tile is currently being dragged (if any).
     // Reset by the drag-end callback below; survives recompositions.
@@ -187,11 +195,14 @@ fun GameCanvas(
         // 两个分支逐字重复，只有 4 处不同（key / type / tileAnim / 数据源）。
         // 手势处理（阈值判定、方向推导、边界 clamp）在两边各写一份，
         // 改动时极易只改一边 —— 这正是过去动画相关 bug 反复出现的土壤。
+        //
+        // D4 之后判别改为 BoardPresentation 的 `when`：新增渲染态时编译器
+        // 会强制这里补分支，不再依赖"animFrame 非空则忽略 board"的口头约定。
         // ------------------------------------------------------------------
-        val slots: List<TileSlot> = if (animFrame != null) {
+        val slots: List<TileSlot> = when (presentation) {
             // 动画进行中：身份来自 renderState.tileId，它就是真实
             // SushiTile.id（spawn tile 也一样）—— 全 App 单一身份来源。
-            animFrame.map { (cellKey, renderState) ->
+            is BoardPresentation.Animating -> presentation.frame.map { (cellKey, renderState) ->
                 TileSlot(
                     tileId = renderState.tileId,
                     row = cellKey.row,
@@ -200,12 +211,11 @@ fun GameCanvas(
                     tileAnim = renderState.anim,
                 )
             }
-        } else {
             // 无动画：直接读棋盘，身份同样是 tile.id。
-            buildList {
+            is BoardPresentation.Stable -> buildList {
                 for (row in 0 until gridSize) {
                     for (col in 0 until gridSize) {
-                        val tile = board.grid[row][col] ?: continue
+                        val tile = presentation.board.grid[row][col] ?: continue
                         add(
                             TileSlot(
                                 tileId = tile.id,

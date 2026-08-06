@@ -213,19 +213,65 @@ data class GameState(
     // Animation (T-ANIM-001)
     // ------------------------------------------------------------------
     /**
-     * 当前动画帧数据。`null` = 无动画进行中，显示普通棋盘。
+     * 当前动画帧数据。`null` = 无动画进行中。
      *
-     * 当此字段非 `null` 时，UI 应渲染 [animFrame] 而非 [board]：
-     * - `animFrame` 包含每个 tile 的 `alpha`、`offsetY`、`anim` 状态
-     * - [board] 在动画期间保持不变（不因动画帧更新）
+     * ⚠️ **不要直接读这个字段做渲染判断**。用 [presentation] —— 它把
+     * "该渲染帧还是渲染棋盘"变成编译器强制的 `when` 分支，而不是靠
+     * "非空时忽略 board"这条只写在注释里的口头约定（见 FIX_PLAN D4）。
+     *
+     * 本字段保留为 [GameState] 的存储形态（`copy()` 写入点），
+     * [presentation] 是它与 [board] 的派生投影。
      *
      * 三个动画阶段（每阶段 100 ms，阶段间有 100 ms 间歇）：
      *   Phase 1 (0-100ms):   被消除的 tile alpha 1→0（Fade Out）
      *   Phase 2 (200-300ms): 存活 tile 从原位置滑落到新位置（Fall）
      *   Phase 3 (400-500ms): 新 tile 从棋盘上方落进空位（Spawn In）
      *
-     * 连锁时：每个 cascade round 各自走一遍 3 帧序列，
-     * round 之间有 100 ms 间歇（由 [GameViewModel] 的 `delay()` 实现）。
+     * 连锁时：每个 cascade round 各自走一遍 3 帧序列，round 之间有
+     * 100 ms 间歇（由 `playCascadeAnimation` 编排，见 CascadeAnimator.kt）。
      */
     val animFrame: AnimFrame? = null,
-)
+) {
+    /**
+     * 棋盘渲染态 —— UI 渲染的唯一入口。
+     *
+     * 把 ([board], [animFrame]) 这对隐式互斥字段收敛成一个密封类型：
+     * 动画期间 [board] 被刻意冻结（还含着已被消除的 tile），视觉真相在
+     * [animFrame] 里。此前 UI 必须靠"animFrame != null 时忽略 board"这条
+     * **只写在注释里**的约定才能正确渲染，编译器不管，改 UI 时极易踩空。
+     *
+     * 现在渲染方必须 `when` 覆盖两个分支，漏了编译不过。
+     */
+    val presentation: BoardPresentation
+        get() = if (animFrame != null) {
+            BoardPresentation.Animating(frame = animFrame, logicalBoard = board)
+        } else {
+            BoardPresentation.Stable(board = board)
+        }
+}
+
+/**
+ * 棋盘渲染态。用密封类型取代 `(board, animFrame?)` 这对隐式互斥字段
+ * （FIX_PLAN D4）。
+ *
+ * 设计要点：**渲染只看这个类型，逻辑仍走 [GameState.board]**。
+ * 手势命中测试、相邻判定这些逻辑用途需要的是"逻辑棋盘"，动画期间它
+ * 恰好是冻结的那份 —— 这正是 [Animating.logicalBoard] 的语义。
+ */
+sealed interface BoardPresentation {
+
+    /** 稳定态：直接渲染 [board]。 */
+    data class Stable(val board: Board) : BoardPresentation
+
+    /**
+     * 动画态：渲染 [frame]。
+     *
+     * @property frame        视觉真相。每 100ms 一变。
+     * @property logicalBoard 仅供手势命中测试等**逻辑**用途，
+     *                        **不要用于绘制** —— 它含着已被消除的 tile。
+     */
+    data class Animating(
+        val frame: AnimFrame,
+        val logicalBoard: Board,
+    ) : BoardPresentation
+}
