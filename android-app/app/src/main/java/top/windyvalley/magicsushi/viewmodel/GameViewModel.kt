@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import top.windyvalley.magicsushi.audio.SoundPlayer
@@ -308,11 +309,26 @@ class GameViewModel(
      *
      * Safe to call from any phase — it just sets the flag and cancels the
      * job. (If the timer wasn't running, the cancel is a no-op.)
+     *
+     * ## 为什么不 cancel swapJob
+     *
+     * 曾经这里有一句 `swapJob?.cancel()`，导致过两个 bug：
+     *
+     * 1. **第一代**：cancel 让协程从 delay 抛 CancellationException，
+     *    终态来不及落盘 → 恢复后棋盘错乱（残帧 + 旧 board，tile 不下落、
+     *    手势失效）。
+     * 2. **第二代**：在取消分支里补写终态修好了错乱，但动画被整段跳过 ——
+     *    点暂停看到的是棋盘瞬间结算完毕，失去了「暂停」的意义。
+     *
+     * 现在改为**挂起而非取消**：动画协程通过 `awaitResume` 挂在
+     * `phase != PAUSED` 上（见 [onSwapAttempt]）。协程始终存活，暂停期间
+     * 不推进帧、不写 state，恢复后从同一位置继续播放。
+     *
+     * 于是 phase 一个字段同时驱动三件事：倒计时停、动画挂起、手势拦截。
      */
     fun onPause() {
         _state.update { it.copy(phase = GamePhase.PAUSED) }
         timerJob?.cancel()
-        swapJob?.cancel()
     }
 
     /**
@@ -593,11 +609,25 @@ class GameViewModel(
                     cascades = cascadeResult.cascades,
                     phaseMs = ANIM_PHASE_MS,
                     gapMs = ANIM_GAP_MS,
-                    // 守卫同时看 phase 和代际：phase 挡住暂停/结束，
-                    // 代际挡住「restart 后 phase 又变回 PLAYING」这个盲区。
+                    // 守卫只负责**永久性**中止：本局已被换掉（代际不符）或
+                    // 已经结束/回到 IDLE。
+                    //
+                    // ⚠️ 这里刻意**不检查 PAUSED**：暂停是临时状态，应该由
+                    // awaitResume 挂起等待，而不是 break 掉剩余轮次。若在此
+                    // 处 break，多轮 cascade 在暂停后就只剩终态一次性落盘，
+                    // 恢复时看不到后续几轮动画。
                     shouldContinue = {
-                        _state.value.phase == GamePhase.PLAYING &&
-                            myGeneration == roundGeneration
+                        myGeneration == roundGeneration &&
+                            _state.value.phase != GamePhase.GAME_OVER &&
+                            _state.value.phase != GamePhase.IDLE
+                    },
+                    // 真暂停：挂在 phase != PAUSED 上。
+                    // 用 StateFlow.first 而非轮询 —— 零 CPU 占用，
+                    // phase 一变回 PLAYING 立即恢复。
+                    awaitResume = {
+                        if (_state.value.phase == GamePhase.PAUSED) {
+                            _state.first { it.phase != GamePhase.PAUSED }
+                        }
                     },
                     onFrame = { board, frame ->
                         // 迟到的帧不得写进新局。
@@ -612,29 +642,28 @@ class GameViewModel(
                 // 动画正常结束
                 commitFinalState.invoke()
             } catch (ce: kotlinx.coroutines.CancellationException) {
-                // 协程被取消（onPause / onRestart / VM 清理）是正常控制流，
-                // 必须原样抛出以维持结构化并发。
+                // 协程被取消（onRestart / VM 清理 / 新 swap 顶掉旧的）是正常
+                // 控制流，必须原样抛出以维持结构化并发。
                 //
-                // ⚠️ 但抛之前**必须先把终态落盘** —— 这是真机 bug 的根因：
+                // ⚠️ 抛之前先把终态落盘。历史原因：
                 //
-                // playCascadeAnimation 在帧之间 delay()。动画中途暂停时
-                // swapJob.cancel() 让 delay 抛 CancellationException，于是
-                // 上面那句 commitFinalState() 根本不执行。结果 board 停在
-                // 动画开始前的旧值、animFrame 卡在中途某一帧。
+                // 曾经 onPause() 也会 cancel 这个 job，而 playCascadeAnimation
+                // 在帧之间 delay()，取消让 delay 抛异常 → 下面那句
+                // commitFinalState 不执行 → board 停在旧值、animFrame 卡在
+                // 中途某一帧。恢复后 UI 渲染残帧（tile 不下落不补齐），
+                // 手势判定又走旧 board（操作无效）。
                 //
-                // 恢复后 animFrame != null 使 presentation 仍是 Animating，
-                // UI 渲染那个残帧：被消除的格子已空、下落只做了一半，看起来
-                // 就是「空位上方 tile 不下落不补齐」。而手势命中判定走的是
-                // state.board（旧棋盘），与屏幕上的残帧对不上 —— 于是「上方
-                // tile 操作无效」。
+                // 现在暂停改为**挂起**（见 onPause 与 awaitResume），不再走
+                // 这条路径。但 onRestart / onCleared / 新 swap 顶掉旧 swap
+                // 仍会取消，落盘依然是必要的兜底 —— 代际守卫会确保过期的
+                // 终态不会污染新局。
                 //
-                // 终态（cascadeResult.finalBoard）是在任何 delay 之前就纯计算
-                // 好的，取消不影响它的正确性，所以这里直接落盘是安全的：
-                // 玩家看到的是「动画跳过，棋盘已结算」，而非状态错乱。
+                // 终态在任何 delay 之前就纯计算好了，取消不影响其正确性。
                 // 回归测试见 engine/CascadeCancellationTest.kt。
                 //
                 // 为什么不放在 finally：finally 对 onRestart 也会执行，
-                // 那时新局已经开始，写入旧局终态会污染新棋盘。
+                // 那时新局已经开始 —— 虽然代际守卫拦得住，但语义上
+                // 「取消时兜底」比「无论如何都写」更清晰。
                 //
                 // 用 ?.invoke()：取消可能发生在 cascade 算完之前（例如无效
                 // 交换的那 150ms 弹回 delay 期间），那时它还是 null，

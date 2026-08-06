@@ -37,6 +37,14 @@ import kotlinx.coroutines.delay
  * @param phaseMs      单帧停留时长。
  * @param gapMs        帧与帧、轮与轮之间的间歇。
  * @param shouldContinue 每轮开始前的守卫；false 表示中止后续轮次。
+ * @param awaitResume  每个帧间等待之后的挂起点。默认空实现（不可暂停）。
+ *                     传入「暂停时挂起、恢复时返回」的实现即可让动画
+ *                     真正暂停在原地 —— 协程始终存活，不推进帧也不写
+ *                     state，恢复后从同一位置继续。
+ *
+ *                     ⚠️ 不要用 `while (paused) delay(16)` 轮询实现：
+ *                     虚拟时钟下会让 advanceTimeBy 无限推进，真机上白耗电。
+ *                     用 flow 的 `first { !paused }` 之类的零轮询写法。
  * @param onFrame      把"当前棋盘 + 当前帧"推给渲染层。`board` 为
  *                     null 表示沿用上一次推送的棋盘（仅换帧）。
  * @return 最后一轮补充完毕的棋盘。调用方通常会用
@@ -49,8 +57,21 @@ suspend fun playCascadeAnimation(
     phaseMs: Long,
     gapMs: Long,
     shouldContinue: () -> Boolean = { true },
+    awaitResume: suspend () -> Unit = {},
     onFrame: (board: Board?, frame: AnimFrame) -> Unit,
 ): Board {
+    /**
+     * 帧间等待 = 正常延时 + 「若处于暂停态则挂在这里」。
+     *
+     * 把两者绑在一处，是为了保证**每个**等待点都是可暂停的 ——
+     * 漏掉任何一个，暂停就会在那一帧「漏过去」，表现为暂停后画面
+     * 还会再动一下。
+     */
+    suspend fun waitPausable(ms: Long) {
+        delay(ms)
+        awaitResume()
+    }
+
     // 逐轮跟踪棋盘。
     //
     // ⚠️ 关键：每个 cascade round 的 matches 是在**不同的** board 状态上
@@ -70,7 +91,7 @@ suspend fun playCascadeAnimation(
         // 后画面多停顿 100ms）。放结尾则必须预判"下一轮会不会播"，那需要
         // 重复调用 shouldContinue —— 会要求调用方保证守卫幂等，不是好接口。
         if (roundIdx > 0) {
-            delay(gapMs)
+            waitPausable(gapMs)
         }
 
         // 本轮的重力与补充各算一次，供帧生成与下一轮共用。
@@ -91,17 +112,17 @@ suspend fun playCascadeAnimation(
 
         // 帧 0: Fade Out —— 同时推送本轮起始棋盘。
         onFrame(currentBoard, frames[0])
-        delay(phaseMs)
-        delay(gapMs)
+        waitPausable(phaseMs)
+        waitPausable(gapMs)
 
         // 帧 1: Fall
         onFrame(null, frames[1])
-        delay(phaseMs)
-        delay(gapMs)
+        waitPausable(phaseMs)
+        waitPausable(gapMs)
 
         // 帧 2: Spawn In
         onFrame(null, frames[2])
-        delay(phaseMs)
+        waitPausable(phaseMs)
 
         // 推进到下一轮起点。与 SpawnIn 帧同源，故「飞进来的 tile」
         // 与「下一轮站在那格的 tile」id 一致。
