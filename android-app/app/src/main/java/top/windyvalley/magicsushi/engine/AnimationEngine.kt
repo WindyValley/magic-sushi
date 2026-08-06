@@ -120,7 +120,11 @@ object AnimationEngine {
      *                          the output of one call as input to the next —
      *                          use the original `board` for each round.
      */
-    fun generateFrames(board: Board, matches: List<Match>): List<AnimFrame> {
+    fun generateFrames(
+        board: Board,
+        matches: List<Match>,
+        fallenBoard: Board? = null,
+    ): List<AnimFrame> {
         if (matches.isEmpty()) {
             // No animation — all tiles stable at full alpha.
             return listOf(emptyStableFrame(board), emptyStableFrame(board), emptyStableFrame(board))
@@ -172,7 +176,14 @@ object AnimationEngine {
         // ------------------------------------------------------------------
         // Ask GravityEngine where tiles end up after the fall.
         // doRefill=false: keep null cells visible so we can generate SpawnIn frames.
-        val fallenBoard = GravityEngine.applyGravity(board, matches, doRefill = false)
+        //
+        // FIX_PLAN P1-2：调用方（GameViewModel 的 cascade 循环）本来也要算一次
+        // 同样的重力来推进到下一轮，此前两边各算一次 —— 不仅浪费，更危险的是
+        // 两次调用的参数可能漂移（VM 那次用的是默认 doRefill=true，会额外跑
+        // RNG 补 tile）。现在允许调用方把已算好的结果传进来复用，
+        // 保证"动画依据的落点"与"下一轮起始棋盘"永远同源。
+        val fallen = fallenBoard
+            ?: GravityEngine.applyGravity(board, matches, doRefill = false)
 
         // Track the "pre-fall row" for each tile so we can compute the offset.
         // Build a map: tileId → pre-fall row.
@@ -190,9 +201,9 @@ object AnimationEngine {
         var nextSpawnId = -1
 
         val frameFall = buildMap<CellKey, TileRenderState> {
-            for (row in 0 until fallenBoard.size) {
-                for (col in 0 until fallenBoard.size) {
-                    val tile = fallenBoard.grid[row][col]
+            for (row in 0 until fallen.size) {
+                for (col in 0 until fallen.size) {
+                    val tile = fallen.grid[row][col]
                     if (tile == null) {
                         // This cell will be filled by a spawn-in tile.
                         // Render nothing now (frame 1 gap — the cell is empty).
@@ -237,9 +248,9 @@ object AnimationEngine {
         // ------------------------------------------------------------------
         val frameSpawnIn = buildMap<CellKey, TileRenderState> {
             // First: all tiles that survived the fall — stable at their new positions.
-            for (row in 0 until fallenBoard.size) {
-                for (col in 0 until fallenBoard.size) {
-                    val tile = fallenBoard.grid[row][col] ?: continue
+            for (row in 0 until fallen.size) {
+                for (col in 0 until fallen.size) {
+                    val tile = fallen.grid[row][col] ?: continue
                     val origRow = preFallRow[tile.id]
                     if (origRow != null && origRow != row) {
                         // Tile that was falling in frame 1 — now at rest.
@@ -284,10 +295,10 @@ object AnimationEngine {
             // We detect this by tracking nullCountFromTop as the count of consecutive
             // nulls seen so far. When we encounter a non-null at row N, subsequent
             // nulls (row N+1, N+2, ...) are interior and get skipped.
-            for (col in 0 until fallenBoard.size) {
+            for (col in 0 until fallen.size) {
                 var nullCountFromTop = 0
-                for (row in 0 until fallenBoard.size) {
-                    val occupant = fallenBoard.grid[row][col]
+                for (row in 0 until fallen.size) {
+                    val occupant = fallen.grid[row][col]
                     if (occupant != null) {
                         // Tile settled here (fell from above or stayed). Reset counter:
                         // any nulls below this row are interior, not top-gaps.

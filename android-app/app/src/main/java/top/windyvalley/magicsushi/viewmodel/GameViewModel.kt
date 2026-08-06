@@ -545,7 +545,22 @@ class GameViewModel(
                 for ((roundIdx, cascadeRound) in cascadeResult.cascades.withIndex()) {
                     if (_state.value.phase != GamePhase.PLAYING) break
 
-                    val frames = AnimationEngine.generateFrames(currentAnimBoard, cascadeRound)
+                    // FIX_PLAN P1-2：本轮重力只算一次。
+                    // 此前 generateFrames 内部算一次（doRefill=false），这里
+                    // 循环末尾又算一次（默认 doRefill=true，还会多跑 RNG 补
+                    // tile），两份结果不同源。现在算一次、两处共用：动画帧依据
+                    // 的落点与下一轮起始棋盘保证一致。
+                    val fallenBoard = GravityEngine.applyGravity(
+                        currentAnimBoard,
+                        cascadeRound,
+                        doRefill = false,
+                    )
+
+                    val frames = AnimationEngine.generateFrames(
+                        currentAnimBoard,
+                        cascadeRound,
+                        fallenBoard = fallenBoard,
+                    )
 
                     // 帧 0: Fade Out (0-100ms)
                     _state.update { it.copy(board = currentAnimBoard, animFrame = frames[0]) }
@@ -565,8 +580,14 @@ class GameViewModel(
                     _state.update { it.copy(animFrame = frames[2]) }
                     delay(ANIM_PHASE_MS)
 
-                    // 本 round 重力落地 → 作为下一 round 动画的起始 board
-                    currentAnimBoard = GravityEngine.applyGravity(currentAnimBoard, cascadeRound)
+                    // 本 round 重力落地 → 作为下一 round 动画的起始 board。
+                    //
+                    // ⚠️ 这里必须补齐空格（spawnRefill），不能直接用上面的
+                    // fallenBoard：那份是 doRefill=false 的中间态，顶部留着
+                    // 空洞专门给 SpawnIn 帧用。而下一轮的 matches 是 cascade
+                    // 在「已补齐」的棋盘上检测出来的，起始态必须对齐，否则
+                    // preFallRow 会基于错误的行号算出虚假 offsetY。
+                    currentAnimBoard = BoardEngine.spawnRefill(fallenBoard)
 
                     // round 之间有间歇；最后一 round 后不需要额外等待
                     if (roundIdx < cascadeResult.cascades.size - 1) {
