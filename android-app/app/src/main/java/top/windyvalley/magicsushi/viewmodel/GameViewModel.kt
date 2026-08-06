@@ -4,8 +4,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -14,6 +17,7 @@ import top.windyvalley.magicsushi.data.PrefsRepository
 import top.windyvalley.magicsushi.engine.BoardEngine
 import top.windyvalley.magicsushi.engine.AnimationEngine
 import top.windyvalley.magicsushi.engine.CascadeEngine
+import top.windyvalley.magicsushi.engine.GameEvent
 import top.windyvalley.magicsushi.engine.GravityEngine
 import top.windyvalley.magicsushi.engine.GamePhase
 import top.windyvalley.magicsushi.engine.GameState
@@ -160,6 +164,23 @@ class GameViewModel(
      * Public read-only view. Compose subscribes via `collectAsState()`.
      */
     val state: StateFlow<GameState> = _state.asStateFlow()
+
+    /**
+     * One-shot game events (see [GameEvent]).
+     *
+     * `extraBufferCapacity = 8` so [tryEmit] never drops an event when the
+     * UI is momentarily busy — with `replay = 0` and no buffer, `tryEmit`
+     * would silently return `false` whenever no collector was ready.
+     *
+     * Deliberately **not** part of [GameState]: transient signals that can
+     * fire twice with the same value (e.g. two consecutive `+5s` rewards)
+     * are lost when modelled as data-class fields, because Compose keys
+     * side effects off value changes. See [GameEvent] for the full rationale.
+     */
+    private val _events = MutableSharedFlow<GameEvent>(extraBufferCapacity = 8)
+
+    /** Public read-only event stream. Compose collects this in a `LaunchedEffect`. */
+    val events: SharedFlow<GameEvent> = _events.asSharedFlow()
 
     /**
      * The currently-running timer coroutine, if any. Held as a `Job?` so
@@ -456,6 +477,7 @@ class GameViewModel(
                             isRollback = true,
                         )
                     }
+                    _events.tryEmit(GameEvent.SwapRejected)
                     // 短暂延迟后回弹（让 UI 显示弹回动画）
                     delay(150)
                     _state.update {
@@ -542,8 +564,14 @@ class GameViewModel(
                         combo = cascadeResult.cascades.size,
                         remainingSeconds = newRemaining,
                         selectedTile = null,
-                        lastRewardSeconds = if (reward > 0) reward else it.lastRewardSeconds,
                     )
+                }
+
+                // 时间奖励是一次性信号，走事件流而非 GameState 字段：
+                // 连续两次都奖励 +5s 时字段值不变，LaunchedEffect 不会重启，
+                // 飘字会漏播（FIX_PLAN D2）。SharedFlow 每次 emit 都独立投递。
+                if (reward > 0) {
+                    _events.tryEmit(GameEvent.TimeReward(reward))
                 }
             } catch (ce: kotlinx.coroutines.CancellationException) {
                 // 协程被取消（onPause / onRestart / VM 清理）是正常控制流，
@@ -609,6 +637,13 @@ class GameViewModel(
                 isNewRecord = isNew,
             )
         }
+
+        // isNewRecord 保留在 state 里供 GameOverDialog 渲染（它是对话框存续
+        // 期间的持续状态）；这里额外发一次事件，供一次性庆祝效果（音效、
+        // 撒花动画）消费。
+        if (isNew) {
+            _events.tryEmit(GameEvent.NewRecord(finalScore))
+        }
     }
 
     // ========================================================================
@@ -624,5 +659,6 @@ class GameViewModel(
     override fun onCleared() {
         super.onCleared()
         timerJob?.cancel()
+        swapJob?.cancel()
     }
 }

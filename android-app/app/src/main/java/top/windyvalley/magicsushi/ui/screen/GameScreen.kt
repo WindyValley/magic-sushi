@@ -97,7 +97,6 @@ fun GameScreen(viewModel: GameViewModel) {
                 Spacer(modifier = Modifier.width(8.dp))
                 TimerDisplay(
                     remainingSeconds = state.remainingSeconds,
-                    lastRewardSeconds = state.lastRewardSeconds,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -147,8 +146,10 @@ fun GameScreen(viewModel: GameViewModel) {
     }
 
     // +Ns 飘字顶层浮层（v1.0.4 独立化）—— 在棋盘之上、Dialog 之下
+    // 消费 VM 的一次性事件流而非 state 字段：连续两次同值奖励（如两次 +5s）
+    // 用 state 字段会因"值未变化"漏播飘字（FIX_PLAN D2）。
     RewardOverlay(
-        lastRewardSeconds = state.lastRewardSeconds,
+        events = viewModel.events,
     )
 
     // 结束对话框

@@ -1,5 +1,7 @@
 package top.windyvalley.magicsushi.engine
 
+import kotlin.random.Random
+
 /**
  * CascadeEngine.kt — recursive cascade / chained-elimination driver.
  *
@@ -149,6 +151,7 @@ object CascadeEngine {
     fun cascadeUntilStable(
         board: Board,
         initialMatches: List<Match>,
+        rng: Random = Random.Default,
     ): CascadeResult {
         // Fast-path: no initial matches → no chain at all. Return
         // identity board (no Gravity call — explicit & cheap).
@@ -173,7 +176,7 @@ object CascadeEngine {
             // path above handles the very first call). Gravity's own
             // identity-return fast-path would also handle an empty
             // input — but we never feed it one.
-            currentBoard = GravityEngine.applyGravity(currentBoard, currentMatches)
+            currentBoard = GravityEngine.applyGravity(currentBoard, currentMatches, rng = rng)
 
             // Step B: detect. If no new matches, the chain is over.
             currentMatches = MatchEngine.detectMatches(currentBoard)

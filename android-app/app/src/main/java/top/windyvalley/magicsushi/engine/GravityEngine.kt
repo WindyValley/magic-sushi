@@ -1,5 +1,7 @@
 package top.windyvalley.magicsushi.engine
 
+import kotlin.random.Random
+
 /**
  * GravityEngine.kt — gravity fall and top-null padding after elimination.
  *
@@ -93,7 +95,12 @@ object GravityEngine {
      *                             fields equal to its current grid
      *                             position.
      */
-    fun applyGravity(board: Board, eliminatedMatches: List<Match>, doRefill: Boolean = true): Board {
+    fun applyGravity(
+        board: Board,
+        eliminatedMatches: List<Match>,
+        doRefill: Boolean = true,
+        rng: Random = Random.Default,
+    ): Board {
         // Fast-path: nothing to do, no allocation, identity return.
         if (eliminatedMatches.isEmpty()) return board
 
@@ -138,7 +145,7 @@ object GravityEngine {
         // CascadeEngine and GameViewModel call spawnRefill explicitly after all
         // cascade rounds are done, so that new tiles can participate in detection.
         return if (doRefill) {
-            BoardEngine.spawnRefill(board.copy(grid = newGrid))
+            BoardEngine.spawnRefill(board.copy(grid = newGrid), rng)
         } else {
             board.copy(grid = newGrid)
         }

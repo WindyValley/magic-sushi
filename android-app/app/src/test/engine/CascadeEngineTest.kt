@@ -2,6 +2,7 @@ package top.windyvalley.magicsushi.engine
 
 import org.junit.Test
 import org.junit.Assert.*
+import kotlin.random.Random
 
 /**
  * Unit tests for [CascadeEngine].
@@ -39,8 +40,40 @@ class CascadeEngineTest {
         val initial = MatchEngine.detectMatches(board)
         assertEquals("test setup: should detect 1 match", 1, initial.size)
 
-        val result = CascadeEngine.cascadeUntilStable(board, initial)
+        // ⚠️ 必须注入固定 seed：spawnRefill 补充的新 tile 有概率又凑成三连，
+        // 触发第 2 轮 cascade。用 Random.Default 时本用例约 1/3 概率失败
+        // （已实测 3 次运行中 1 次失败）——属于预先存在的 flaky 测试。
+        // seed = 20250806L 下补充的 tile 不产生新匹配，恰好 1 轮。
+        val result = CascadeEngine.cascadeUntilStable(board, initial, rng = Random(20250806L))
         assertEquals(1, result.cascades.size)
+    }
+
+    @Test
+    fun `cascadeUntilStable 的轮数至少为 1 且不超过上限（任意 seed）`() {
+        // 上一个用例锁定"某个特定 seed 下恰好 1 轮"；本用例验证与 seed 无关的
+        // 通用不变量，避免把偶然的随机结果当成规格。
+        val filler = arrayOf(SushiType.SUSHI3, SushiType.SUSHI4, SushiType.SUSHI5)
+        repeat(30) { seed ->
+            var nextId = 0
+            val grid: Array<Array<SushiTile?>> = Array(7) { r -> Array<SushiTile?>(7) { c ->
+                val t = if (r == 3 && c < 3) SushiType.SUSHI1 else filler[(c + r) % 3]
+                SushiTile(id = nextId++, type = t, row = r, col = c, isSelected = false, isLocked = false)
+            }}
+            val board = Board(size = 7, grid = grid)
+            val initial = MatchEngine.detectMatches(board)
+            val result = CascadeEngine.cascadeUntilStable(board, initial, rng = Random(seed.toLong()))
+
+            assertTrue(
+                "seed=$seed: 有初始匹配时至少应有 1 轮 cascade",
+                result.cascades.size >= 1,
+            )
+            assertTrue(
+                "seed=$seed: 轮数不应超过 MAX_CASCADE_ITERATIONS+1，实际 ${result.cascades.size}",
+                result.cascades.size <= CascadeEngine.MAX_CASCADE_ITERATIONS + 1,
+            )
+            assertEquals("seed=$seed: finalBoard 必须填满", 49,
+                result.finalBoard.grid.flatten().filterNotNull().size)
+        }
     }
 
     @Test

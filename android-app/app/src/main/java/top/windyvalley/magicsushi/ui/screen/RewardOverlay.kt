@@ -23,6 +23,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.filterIsInstance
+import top.windyvalley.magicsushi.engine.GameEvent
 
 /**
  * RewardOverlay.kt — 屏幕顶层独立浮层，用于渲染消除奖励飘字（+Ns）。
@@ -39,10 +42,18 @@ import kotlinx.coroutines.delay
  *
  * ## 行为
  *
- * - 监听 `lastRewardSeconds` 变化（`null` / `0` / 负数不触发）。
- * - 触发时显示 `+Ns` 文字（24sp，绿色 `#8BC34A`），从下方滑入并向上
- *   飘出 + 渐隐，1.5s 后自动消失。
+ * - 订阅 [events]，只消费 [GameEvent.TimeReward]。
+ * - 每收到一个事件就显示 `+Ns` 文字（24sp，绿色 `#8BC34A`），从下方滑入
+ *   并向上飘出 + 渐隐，1.5s 后自动消失。
  * - 背景为半透明深色 `#CC2A1810` 圆角胶囊。
+ *
+ * ## 为什么用事件流而不是 state 字段（FIX_PLAN D2）
+ *
+ * 旧版签名是 `lastRewardSeconds: Int?`，靠 `LaunchedEffect(lastRewardSeconds)`
+ * 的 key 变化触发飘字。但 `+5s` 是本游戏最常见的奖励值 —— 连续两次消除
+ * 都奖励 5 秒时，字段值 `5 → 5` 没有变化，`LaunchedEffect` 不重启，
+ * **第二次飘字直接不显示**。改为 collect `SharedFlow` 后，每次 emit 都是
+ * 独立投递，与值是否重复无关。
  *
  * ## 位置
  *
@@ -52,27 +63,28 @@ import kotlinx.coroutines.delay
  *
  * ## 数据契约
  *
- * - [lastRewardSeconds]   — 来自 `GameState.lastRewardSeconds`。
- *                            `null` / `0` / 负数都不触发飘字；
- *                            `> 0` 时显示对应 `+Ns`。
+ * - [events]              — 来自 `GameViewModel.events`。本组件只关心
+ *                            [GameEvent.TimeReward]，其余类型忽略。
+ *                            VM 侧已保证 `seconds > 0`。
  * - [modifier]            — 标准 Compose modifier（覆盖 `Box` 的位置用）。
  *
- * @param lastRewardSeconds   最近一次消除奖励秒数。
- * @param modifier            标准 Compose modifier。
+ * @param events    一次性游戏事件流。
+ * @param modifier  标准 Compose modifier。
  */
 @Composable
 fun RewardOverlay(
-    lastRewardSeconds: Int?,
+    events: SharedFlow<GameEvent>,
     modifier: Modifier = Modifier,
 ) {
     // ----- +Ns 飘字：维持 1.5 秒后消失 -----
-    // 当 lastRewardSeconds 变化且 > 0 时：把数值存入本地 state、显示飘字，
-    // 1.5s 后隐藏。null / 0 / 负数都不触发（保持现状）。
+    // collect 事件流：同值连续触发也会各自走一遍（这正是改用事件流的原因）。
+    // 若上一次飘字还在显示期间就来了新事件，rewardValue 会被更新并重新计时，
+    // 视觉上表现为飘字数值刷新 —— 符合"最近一次奖励"的语义。
     var showReward by remember { mutableStateOf(false) }
     var rewardValue by remember { mutableIntStateOf(0) }
-    LaunchedEffect(lastRewardSeconds) {
-        if (lastRewardSeconds != null && lastRewardSeconds > 0) {
-            rewardValue = lastRewardSeconds
+    LaunchedEffect(Unit) {
+        events.filterIsInstance<GameEvent.TimeReward>().collect { event ->
+            rewardValue = event.seconds
             showReward = true
             delay(1500)
             showReward = false

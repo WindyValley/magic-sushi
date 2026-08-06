@@ -187,15 +187,19 @@ enum class GamePhase {
  * @property isNewRecord        `true` if this round broke the high score.
  *                              Default false. Set by `onGameOver()` in
  *                              the VM.
- * @property lastRewardSeconds  最近一次消除奖励的秒数（`null` 表示本局
- *                              还没有触发过奖励）。由 `GameViewModel.onSwapAttempt`
- *                              在 `TimerEngine.rewardOnMatch()` 返回值 `> 0` 时写入，
- *                              用于驱动 `TimerDisplay` 的 `+Ns` 飘字动画。
- *                              设计上只在 `reward > 0` 时刷新，避免 `0` 覆盖之前
- *                              的非零值（保持飘字显示直到下次更新）。
  */
 data class GameState(
-    val board: Board = BoardEngine.generateInitialBoard(),
+    /**
+     * 当前棋盘。默认值是**空棋盘**（全 `null`），真实棋盘由
+     * `GameViewModel.startGame()` 注入。
+     *
+     * 早期版本这里的默认值是 `BoardEngine.generateInitialBoard()`，会导致：
+     * 1. `GameState()` 构造不纯 —— 默认参数里跑拒绝采样循环 + RNG；
+     * 2. 每局启动白算一副棋盘 —— VM 构造 `_state` 时生成一副，
+     *    紧接着 `init { startGame() }` 又生成一副，第一副直接丢弃。
+     * 详见 FIX_PLAN D6。
+     */
+    val board: Board = Board(),
     val score: Int = 0,
     val combo: Int = 0,                        // 当前连击数
     val remainingSeconds: Int = TimerEngine.INITIAL_SECONDS,
@@ -205,7 +209,6 @@ data class GameState(
     val highScore: Int = 0,
     val isRollback: Boolean = false,           // 上次交换无效，需弹回
     val isNewRecord: Boolean = false,          // 本局打破最高分
-    val lastRewardSeconds: Int? = null,        // 最近一次消除奖励秒数（null = 无）
     // ------------------------------------------------------------------
     // Animation (T-ANIM-001)
     // ------------------------------------------------------------------
@@ -272,15 +275,27 @@ fun main() {
     check(!s0.isRollback) { "default isRollback should be false" }
     check(!s0.isNewRecord) { "default isNewRecord should be false" }
 
-    // --- Default board: 7×7, no initial 3-in-a-row ---
+    // --- Default board: 7×7, 且为空棋盘（FIX_PLAN D6）---
+    // 默认 GameState 不再在默认参数里跑 RNG 生成棋盘，因此默认棋盘是全 null。
+    // 真实棋盘由 GameViewModel.startGame() 调 BoardEngine.generateInitialBoard()
+    // 注入 —— 「无初始三连」这个不变量在 BoardEngineTest 中验证，不在这里。
     check(s0.board.size == 7) { "default board should be 7×7, was ${s0.board.size}" }
     check(s0.board.grid.size == 7) { "default board grid rows should be 7" }
     check(s0.board.grid.all { it.size == 7 }) { "default board grid cols should be 7" }
-    check(s0.board.grid.all { row -> row.all { it != null } }) {
-        "default board should have no null cells (initial fill)"
+    check(s0.board.grid.all { row -> row.all { it == null } }) {
+        "default board should be empty (real board is injected by startGame())"
     }
     check(MatchEngine.detectMatches(s0.board).isEmpty()) {
-        "default board should have no initial 3-in-a-row"
+        "empty board should have no matches"
+    }
+
+    // --- 注入真实棋盘后才有「无初始三连」这个性质 ---
+    val sStarted = s0.copy(board = BoardEngine.generateInitialBoard(seed = 1L))
+    check(sStarted.board.grid.all { row -> row.all { it != null } }) {
+        "injected board should have no null cells"
+    }
+    check(MatchEngine.detectMatches(sStarted.board).isEmpty()) {
+        "injected board should have no initial 3-in-a-row"
     }
 
     // --- data class: copy() preserves untouched fields ---
