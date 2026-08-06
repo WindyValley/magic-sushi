@@ -70,6 +70,14 @@ dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
 
+    // DataStore —— 历史记录持久化（FIX_PLAN D8）。
+    //
+    // 为什么不继续用 SharedPreferences：PrefsRepository 在构造函数里
+    // 调 getSharedPreferences()，那是**主线程同步读盘**。加历史记录后
+    // 数据量从 2 个标量涨到 50 条记录，同步 IO 的代价不再可忽略。
+    // DataStore 的读写都是 suspend/Flow，天然在 IO 线程。
+    implementation("androidx.datastore:datastore-preferences:1.0.0")
+
     // Jetpack Compose (BOM)
     val composeBom = platform("androidx.compose:compose-bom:2024.02.00")
     implementation(composeBom)

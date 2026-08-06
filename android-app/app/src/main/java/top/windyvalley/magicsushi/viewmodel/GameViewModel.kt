@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -14,11 +15,13 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import top.windyvalley.magicsushi.audio.SoundPlayer
+import top.windyvalley.magicsushi.data.HistoryRepository
 import top.windyvalley.magicsushi.data.PrefsRepository
 import top.windyvalley.magicsushi.engine.BoardEngine
 import top.windyvalley.magicsushi.engine.AnimationEngine
 import top.windyvalley.magicsushi.engine.CascadeEngine
 import top.windyvalley.magicsushi.engine.GameEvent
+import top.windyvalley.magicsushi.engine.GameRecord
 import top.windyvalley.magicsushi.engine.GravityEngine
 import top.windyvalley.magicsushi.engine.GamePhase
 import top.windyvalley.magicsushi.engine.GameState
@@ -139,6 +142,7 @@ import top.windyvalley.magicsushi.engine.playCascadeAnimation
  */
 class GameViewModel(
     private val prefsRepo: PrefsRepository,
+    private val historyRepo: HistoryRepository,
     private val soundPlayer: SoundPlayer,
 ) : ViewModel() {
 
@@ -183,6 +187,15 @@ class GameViewModel(
 
     /** Public read-only event stream. Compose collects this in a `LaunchedEffect`. */
     val events: SharedFlow<GameEvent> = _events.asSharedFlow()
+
+    /**
+     * 历史记录流（分数降序，同分新的在前，最多
+     * [top.windyvalley.magicsushi.engine.GameHistory.MAX_RECORDS] 条）。
+     *
+     * 直接转发 Repository 的 Flow —— VM 不缓存，因为历史界面是独立屏幕，
+     * 每次进入重新订阅即可，没有必要让它常驻内存。
+     */
+    val history: Flow<List<GameRecord>> = historyRepo.records
 
     /**
      * The currently-running timer coroutine, if any. Held as a `Job?` so
@@ -230,6 +243,25 @@ class GameViewModel(
      * 当时的代际，落盘前比对，不一致就放弃写入。
      */
     private var roundGeneration = 0L
+
+    /**
+     * 本局成绩是否已写入历史记录。
+     *
+     * ## 为什么需要它
+     *
+     * 成绩要在**三条路径**都入库（这是用户报的「重开/退出时成绩没进历史」
+     * 的修法）：
+     *
+     * 1. 倒计时归零 → [onGameOver]
+     * 2. 中途重新开始 → [onRestart]
+     * 3. 退出到主菜单 / 结束进程 → [onQuit]
+     *
+     * 但三者会**串联触发**：game over 后玩家点「重新开始」，onGameOver 和
+     * onRestart 都会跑。若各写一次，同一局会在历史里出现两条。
+     *
+     * 这个标记保证「一局最多入库一次」。由 [startGame] 复位。
+     */
+    private var currentRoundRecorded = false
 
     init {
         // FIX_PLAN D5：把音效的静音判断绑定到 PrefsRepository —— 静音状态的
@@ -279,6 +311,11 @@ class GameViewModel(
         // 负责在「cancel 与协程实际停止之间的窗口」里挡住迟到的写入。
         swapJob?.cancel()
         roundGeneration++
+        // 新一局尚未入库。
+        //
+        // ⚠️ 顺序要紧：调用方（onRestart / onQuit）必须**先**写旧局成绩
+        // 再调 startGame，否则这里一复位就再也认不出「旧局还没入库」。
+        currentRoundRecorded = false
         _state.update {
             GameState(
                 board = BoardEngine.generateInitialBoard(),
@@ -292,13 +329,85 @@ class GameViewModel(
     }
 
     /**
+     * 把本局成绩写入历史记录。幂等 —— 同一局重复调用只写一次。
+     *
+     * ## 为什么 0 分不入库
+     *
+     * 玩家进游戏没动就退出、或误触重开，会产生一堆 0 分记录淹没历史。
+     * 0 分不构成「一局游戏」。
+     *
+     * ## 为什么用 viewModelScope 而不是调用方的协程
+     *
+     * 退出路径（[onQuit]）之后进程可能马上结束。DataStore 的写是 suspend，
+     * 挂在 viewModelScope 上至少能在 Activity 存活期间完成；真要保证
+     * 「进程被杀前一定写完」得用 `GlobalScope` 或 WorkManager，但历史记录
+     * 丢一条不值得引入那个复杂度。
+     *
+     * 注意 [onQuit] 里对此有额外处理（等写完再退出进程）。
+     */
+    private fun recordCurrentRound() {
+        if (currentRoundRecorded) return
+        val score = _state.value.score
+        if (score <= 0) {
+            // 0 分也算「已处理」，免得后续路径反复检查。
+            currentRoundRecorded = true
+            return
+        }
+        currentRoundRecorded = true
+        val record = GameRecord(
+            score = score,
+            timestampMillis = System.currentTimeMillis(),
+            isNewRecord = _state.value.isNewRecord,
+        )
+        viewModelScope.launch {
+            historyRepo.addRecord(record)
+        }
+    }
+
+    /**
      * Restart from a game-over or any other phase. Equivalent to
      * [startGame] but explicitly named for the restart-button use case.
      * Cancels any in-flight timer first.
+     *
+     * 先把当前局成绩写入历史再开新局 —— 这是用户报的「中途重开成绩没进
+     * 历史」的修法。[recordCurrentRound] 是幂等的，所以 game over 后点重开
+     * 不会写两条。
      */
     fun onRestart() {
+        recordCurrentRound()
         timerJob?.cancel()
         startGame()
+    }
+
+    /**
+     * 退出当前对局。写入成绩后把状态置为 [GamePhase.IDLE]。
+     *
+     * 由 UI 的「退出」按钮调用。真正「结束进程」还是「回主菜单」由 UI
+     * 决定 —— VM 只负责把本局收尾干净。
+     *
+     * @param onRecorded 成绩确实写完后的回调（在主线程）。退出进程这类
+     *                   不可逆操作应放在这里，避免写盘被进程终止打断。
+     */
+    fun onQuit(onRecorded: () -> Unit = {}) {
+        val alreadyRecorded = currentRoundRecorded
+        val score = _state.value.score
+        recordCurrentRound()
+        timerJob?.cancel()
+        swapJob?.cancel()
+        _state.update { it.copy(phase = GamePhase.IDLE) }
+
+        if (alreadyRecorded || score <= 0) {
+            // 没有实际写盘动作，直接回调。
+            onRecorded()
+        } else {
+            // 等写盘完成 —— 与 recordCurrentRound 里那个 launch 是两个协程，
+            // 但 DataStore 的 edit 有内部串行化，所以这个 launch 排在后面
+            // 执行完时，前一个写入必然已落盘。
+            viewModelScope.launch {
+                historyRepo.getRecordsOnce()
+                onRecorded()
+            }
+        }
     }
 
     /**
@@ -737,6 +846,12 @@ class GameViewModel(
         if (isNew) {
             _events.tryEmit(GameEvent.NewRecord(finalScore))
         }
+
+        // 写入历史记录。
+        //
+        // ⚠️ 必须放在上面那个 _state.update 之后：recordCurrentRound 会读
+        // state.isNewRecord 填进记录，放前面读到的是上一局的值。
+        recordCurrentRound()
     }
 
     // ========================================================================

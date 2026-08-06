@@ -19,6 +19,7 @@ import top.windyvalley.magicsushi.ui.screen.GameScreen
 import top.windyvalley.magicsushi.ui.theme.MagicSushiTheme
 import top.windyvalley.magicsushi.viewmodel.GameViewModel
 import top.windyvalley.magicsushi.viewmodel.GameViewModelFactory
+import kotlin.system.exitProcess
 
 class MainActivity : ComponentActivity() {
 
@@ -30,7 +31,7 @@ class MainActivity : ComponentActivity() {
         get() = application as MagicSushiApp
 
     private val viewModel: GameViewModel by viewModels {
-        GameViewModelFactory(app.prefsRepo, app.soundPlayer)
+        GameViewModelFactory(app.prefsRepo, app.historyRepo, app.soundPlayer)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,7 +53,23 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    GameScreen(viewModel)
+                    GameScreen(
+                        viewModel = viewModel,
+                        // 退出游戏 = 真正结束进程。
+                        //
+                        // finishAffinity() 清掉整个 task（不只当前 Activity），
+                        // exitProcess(0) 确保进程真的终止 —— 只调 finish 的话
+                        // 进程会留在后台缓存，玩家从最近任务点回来会看到旧状态。
+                        //
+                        // 此回调由 VM 在**成绩写入历史之后**触发，所以这里
+                        // 直接退是安全的（见 GameViewModel.onQuit）。
+                        //
+                        // 批次 C 引入导航后，这里会改成「回主菜单屏」。
+                        onQuit = {
+                            finishAffinity()
+                            exitProcess(0)
+                        },
+                    )
                 }
             }
         }

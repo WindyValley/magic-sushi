@@ -54,7 +54,17 @@ import top.windyvalley.magicsushi.viewmodel.GameViewModel
  * 重玩：弹窗的"重玩"按钮调 [GameViewModel.onRestart]。
  */
 @Composable
-fun GameScreen(viewModel: GameViewModel) {
+fun GameScreen(
+    viewModel: GameViewModel,
+    /**
+     * 退出游戏。由调用方（Activity）决定语义 —— 当前是结束进程，
+     * 批次 C 引入导航后会变成「回主菜单」。
+     *
+     * 此回调在**成绩已写入历史之后**被调用，可以安全执行 exitProcess
+     * 这类不可逆操作。
+     */
+    onQuit: () -> Unit = {},
+) {
     val state by viewModel.state.collectAsState()
 
     // 第一次进入：IDLE → PLAYING
@@ -140,8 +150,16 @@ fun GameScreen(viewModel: GameViewModel) {
             onResume = { viewModel.onResume() },
             onRestart = { viewModel.onRestart() },
             onQuit = {
-                // 退出 = 重新开始（按用户偏好）
-                viewModel.onRestart()
+                // 退出：先让 VM 把成绩写入历史，写完再真正退出。
+                //
+                // ⚠️ 顺序要紧。exitProcess 是不可逆的，DataStore 的写是
+                // 异步的 —— 如果不等回调就退，成绩会丢。这正是用户报的
+                // 「退出时成绩没进历史」的一半原因（另一半是历史功能
+                // 根本不存在）。
+                //
+                // 批次 C 会把这里改成「回主菜单」，那时只需把 onQuit 这个
+                // lambda 换掉，VM 侧不用动。
+                viewModel.onQuit(onRecorded = onQuit)
             },
         )
     }
@@ -153,6 +171,14 @@ fun GameScreen(viewModel: GameViewModel) {
             highScore = state.highScore,
             isNewRecord = state.isNewRecord,
             onRestart = { viewModel.onRestart() },
+            // 修 bug：这个参数一直存在（带默认空实现），但 GameScreen
+            // 从未传过 —— 于是「返回菜单」按钮点了没任何反应。
+            //
+            // 成绩此时已由 onGameOver 写入历史（recordCurrentRound 幂等），
+            // 所以这里 onQuit 不会重复写。
+            onBackToMenu = {
+                viewModel.onQuit(onRecorded = onQuit)
+            },
         )
     }
 }

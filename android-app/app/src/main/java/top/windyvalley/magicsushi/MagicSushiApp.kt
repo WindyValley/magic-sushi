@@ -2,6 +2,7 @@ package top.windyvalley.magicsushi
 
 import android.app.Application
 import top.windyvalley.magicsushi.audio.SoundPlayer
+import top.windyvalley.magicsushi.data.HistoryRepository
 import top.windyvalley.magicsushi.data.PrefsRepository
 
 /**
@@ -38,6 +39,14 @@ class MagicSushiApp : Application() {
 
     /** 应用级持久化仓库。设置类状态（静音、最高分）的唯一数据源。 */
     val prefsRepo: PrefsRepository by lazy { PrefsRepository(this) }
+
+    /**
+     * 历史记录仓库（DataStore）。
+     *
+     * 与 [prefsRepo] 分开：那个是 SharedPreferences 存两个标量，
+     * 这个是 DataStore 存最多 50 条记录（FIX_PLAN D8）。
+     */
+    val historyRepo: HistoryRepository by lazy { HistoryRepository(this) }
 
     /** 应用级音效播放器。静音状态从 [prefsRepo] 读取，自身不持有该状态。 */
     val soundPlayer: SoundPlayer by lazy { SoundPlayer(this) }
