@@ -83,7 +83,7 @@ object BoardEngine {
                 arrayOfNulls<SushiTile>(BOARD_SIZE).also { rowArr ->
                     for (col in 0 until BOARD_SIZE) {
                         rowArr[col] = SushiTile(
-                            id = row * BOARD_SIZE + col,
+                            id = TileIdGenerator.next(),
                             type = SushiType.entries.random(rng),
                             row = row,
                             col = col,
@@ -114,7 +114,7 @@ object BoardEngine {
                 for (col in 0 until BOARD_SIZE) {
                     val type = if ((row + col) % 2 == 0) typeA else typeB
                     rowArr[col] = SushiTile(
-                        id = row * BOARD_SIZE + col,
+                        id = TileIdGenerator.next(),
                         type = type,
                         row = row,
                         col = col,
@@ -140,10 +140,13 @@ object BoardEngine {
      * play, cascade scoring rewards consecutive rounds). [CascadeEngine] will
      * detect any chain reactions in the same [cascadeUntilStable] call.
      *
-     * Id allocation: `row * BOARD_SIZE + col` matches [generateInitialBoard]
-     * so ids stay unique within a board generation. (Tiles from different
-     * rounds may share ids across the game's lifetime — `id` is only used
-     * as a Compose `key`, never as a cross-round identity.)
+     * Id allocation: 每个新 tile 从 [TileIdGenerator] 领取一个**全局单调
+     * 递增**的 id，保证同一块棋盘内（以及整局游戏内）绝不重复。
+     *
+     * 历史实现用 `row * BOARD_SIZE + col` 推导 id，会与重力换位后的老 tile
+     * 撞号 —— 因为本函数只知道「哪些格子是空的」，不知道棋盘上已经有哪些
+     * id 在用。撞号会导致 Compose 同级 `key()` 重复、复用错误的 slot，
+     * 表现为未参与消除的 tile 莫名跳动。详见 [TileIdGenerator] 的类文档。
      *
      * @param board the post-gravity board (some cells may be `null`)
      * @param rng   RNG to draw new types from. Defaults to system RNG —
@@ -159,7 +162,7 @@ object BoardEngine {
             for (col in 0 until board.size) {
                 if (newGrid[row][col] == null) {
                     newGrid[row][col] = SushiTile(
-                        id = row * BOARD_SIZE + col,
+                        id = TileIdGenerator.next(),
                         type = SushiType.entries.random(rng),
                         row = row,
                         col = col,

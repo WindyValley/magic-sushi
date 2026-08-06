@@ -54,9 +54,32 @@ class BoardEngineTest {
     fun `generateInitialBoard is deterministic for same seed`() {
         val a = BoardEngine.generateInitialBoard(seed = 123L)
         val b = BoardEngine.generateInitialBoard(seed = 123L)
+
+        // seed 保证的是「类型布局」确定，而不是 tile id 相同。
+        // id 由 TileIdGenerator 全局单调分配（见 FIX_PLAN D1），
+        // 两次调用必然拿到不同 id —— 这是有意为之：id 是身份标识，
+        // 复用 id 会导致 Compose key 撞号、tile 错误跳动。
+        // 因此这里比较 (type, row, col)，不比较 id。
+        fun layoutOf(board: Board): List<Triple<SushiType?, Int, Int>> =
+            (0 until board.size).flatMap { r ->
+                (0 until board.size).map { c ->
+                    val t = board.grid[r][c]
+                    Triple(t?.type, r, c)
+                }
+            }
+
+        assertEquals(
+            "same seed must produce the same type layout",
+            layoutOf(a),
+            layoutOf(b),
+        )
+
+        // 反向确认：id 不应跨调用复用。
+        val idsA = a.grid.flatMap { row -> row.mapNotNull { it?.id } }.toSet()
+        val idsB = b.grid.flatMap { row -> row.mapNotNull { it?.id } }.toSet()
         assertTrue(
-            "same seed must produce structurally equal grids",
-            a.grid.contentDeepEquals(b.grid),
+            "tile ids must NOT be reused across boards (Compose key uniqueness)",
+            (idsA intersect idsB).isEmpty(),
         )
     }
 
