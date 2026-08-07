@@ -20,12 +20,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -50,15 +46,15 @@ import top.windyvalley.magicsushi.viewmodel.GameViewModel
  * 状态机驱动：VM 内部维护 phase (IDLE / PLAYING / PAUSED / GAME_OVER)，
  * 本 Composable 只负责把 phase 转成对应的 Dialog 可见性。
  *
- * 初始化：第一次进入时调用 [GameViewModel.startGame] 让 IDLE → PLAYING。
+ * 开局时机：**不在本 Composable 内**。由调用方（MainActivity 的
+ * AppScreen.Game 分支）在进入游戏屏时调 [GameViewModel.startGame]。
  * 重玩：弹窗的"重玩"按钮调 [GameViewModel.onRestart]。
  */
 @Composable
 fun GameScreen(
     viewModel: GameViewModel,
     /**
-     * 退出游戏。由调用方（Activity）决定语义 —— 当前是结束进程，
-     * 批次 C 引入导航后会变成「回主菜单」。
+     * 退出游戏。由调用方（Activity）决定语义 —— 批次 C 起是「回主菜单」。
      *
      * 此回调在**成绩已写入历史之后**被调用，可以安全执行 exitProcess
      * 这类不可逆操作。
@@ -66,13 +62,6 @@ fun GameScreen(
     onQuit: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
-
-    // 第一次进入：IDLE → PLAYING
-    LaunchedEffect(Unit) {
-        if (state.phase == GamePhase.IDLE) {
-            viewModel.startGame()
-        }
-    }
 
     Box(
         modifier = Modifier
@@ -150,15 +139,16 @@ fun GameScreen(
             onResume = { viewModel.onResume() },
             onRestart = { viewModel.onRestart() },
             onQuit = {
-                // 退出：先让 VM 把成绩写入历史，写完再真正退出。
+                // 退出：先让 VM 把成绩写入历史，写完再回主菜单。
                 //
-                // ⚠️ 顺序要紧。exitProcess 是不可逆的，DataStore 的写是
-                // 异步的 —— 如果不等回调就退，成绩会丢。这正是用户报的
+                // ⚠️ 顺序要紧。DataStore 的写是异步的 —— 不等回调就切屏，
+                // 玩家立刻去看历史记录可能看不到刚打的这局。这正是用户报的
                 // 「退出时成绩没进历史」的一半原因（另一半是历史功能
                 // 根本不存在）。
                 //
-                // 批次 C 会把这里改成「回主菜单」，那时只需把 onQuit 这个
-                // lambda 换掉，VM 侧不用动。
+                // 批次 C 把 onQuit 的语义从「结束进程」换成了「回主菜单」，
+                // VM 侧一行未动 —— 因为 VM 只负责写完成绩后回调，
+                // 「回调里做什么」始终是 UI 的决定。
                 viewModel.onQuit(onRecorded = onQuit)
             },
         )

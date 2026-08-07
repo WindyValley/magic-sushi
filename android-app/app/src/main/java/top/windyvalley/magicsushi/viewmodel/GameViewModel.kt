@@ -283,9 +283,18 @@ class GameViewModel(
             }
         }
 
-        // Auto-start the game on construction. If you want a manual "Start"
-        // button, change this to no-op and gate the timer on a user action.
-        startGame()
+        // ⚠️ 刻意**不**在这里 startGame()。
+        //
+        // 批次 C 引入开始界面后，VM 的构造时机与「玩家想开局」不再等同：
+        // `by viewModels()` 是懒加载，但 MainActivity 的生命周期观察者
+        // （ON_PAUSE/ON_RESUME → viewModel.onPause()/onResume()）在 onCreate
+        // 里就注册了，一旦触发就会实例化 VM。于是玩家还停在菜单，
+        // 构造函数里的 startGame() 已经让倒计时在后台跑起来 ——
+        // 等他点【开始游戏】时时间已经少了好几秒。
+        //
+        // 现在开局的唯一触发点是 UI 显式调用 startGame()（见
+        // MainActivity 的 AppScreen.Game 分支）。phase 保持默认的 IDLE，
+        // 语义正好对上：「还没开始」。
     }
 
     // ========================================================================
@@ -408,6 +417,28 @@ class GameViewModel(
                 onRecorded()
             }
         }
+    }
+
+    /**
+     * 系统级恢复（Activity 回到前台）。
+     *
+     * ## 为什么不能直接用 [onResume]
+     *
+     * [onResume] 的语义是「解除暂停」：它把 PAUSED 翻回 PLAYING 并重启
+     * 倒计时。批次 C 之前这两件事是同一件 —— 只有游戏屏，回到前台就该继续玩。
+     *
+     * 引入菜单后不再等同：玩家在**菜单或历史记录屏**时切后台再回来，
+     * ON_RESUME 照样触发。此时若 phase 恰好是 PAUSED（上一局暂停后
+     * 从对话框退到了菜单），[onResume] 会让倒计时在玩家看不见棋盘的情况下
+     * 跑起来。
+     *
+     * 所以系统恢复要多一个条件：**当前必须真的在游戏屏**。
+     * 该信息只有 UI 知道，故由调用方传入。
+     *
+     * @param isOnGameScreen 当前是否停留在游戏屏
+     */
+    fun onSystemResume(isOnGameScreen: Boolean) {
+        if (isOnGameScreen) onResume()
     }
 
     /**
