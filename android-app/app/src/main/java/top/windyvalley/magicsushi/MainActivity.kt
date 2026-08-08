@@ -18,6 +18,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.Lifecycle
 import top.windyvalley.magicsushi.ui.navigation.AppScreen
+import top.windyvalley.magicsushi.ui.navigation.AppScreenSaver
 import top.windyvalley.magicsushi.ui.screen.GameScreen
 import top.windyvalley.magicsushi.ui.screen.HistoryScreen
 import top.windyvalley.magicsushi.ui.screen.MainMenuScreen
@@ -115,9 +116,10 @@ class MainActivity : ComponentActivity() {
  * 跨配置变更存活，对局还在，只是看不见了。`rememberSaveable` 让屏幕状态与
  * VM 的存活期对齐。
  *
- * `AppScreen` 的成员都是 `data object`，Compose 能直接存进 Bundle
- * （走 Parcelable/Serializable 之外的默认 Saver 时 object 单例天然可省），
- * 无需自定义 Saver。
+ * `AppScreen` 的成员都是 `data object`，但**不能**直接交给 `rememberSaveable` ——
+ * 默认 saver 只接受能进 Bundle 的类型，`data object` 不在白名单里，会在首次
+ * composition 的 `onRemembered` 阶段抛 `IllegalArgumentException`（冷启动即崩）。
+ * 所以显式传 `stateSaver = AppScreenSaver`，把屏幕存成它的 `key` 字符串。
  *
  * ## 为什么 Game 屏用 startGame() 而不是依赖 phase 判断
  *
@@ -136,7 +138,9 @@ private fun AppRoot(
     onScreenChanged: (AppScreen) -> Unit,
     onExitApp: () -> Unit,
 ) {
-    var screen: AppScreen by rememberSaveable { mutableStateOf(AppScreen.Menu) }
+    var screen: AppScreen by rememberSaveable(stateSaver = AppScreenSaver) {
+        mutableStateOf(AppScreen.Menu)
+    }
 
     // 把导航状态单向同步给 Activity（供 composition 外的生命周期观察者读）。
     LaunchedEffect(screen) { onScreenChanged(screen) }
