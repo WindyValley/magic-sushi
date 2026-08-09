@@ -59,6 +59,32 @@ object TileIdGenerator {
     fun next(): Int = counter.incrementAndGet()
 
     /**
+     * 把计数器推进到**严格大于** [minExclusive] 的位置。
+     *
+     * ## 为什么需要它
+     *
+     * 计数器活在进程内存里，进程重启即归零。而对局快照（断点续玩）会把
+     * 带 id 的 tile 从磁盘恢复回来 —— 若不同步计数器，`next()` 会从 1
+     * 重新发号，与棋盘上存活的 tile 撞号。
+     *
+     * 撞号的后果不是崩溃而是**视觉错乱**：Compose 用 tile id 当 `key`，
+     * 两个同 id 的 tile 会被认成同一个，动画在它们之间乱窜。这正是
+     * [resetForTest] 的注释里警告过的那个 bug —— 进程重启是一次隐式
+     * reset，只是没人调用它。
+     *
+     * ## 幂等且单调
+     *
+     * 只在当前值更小时才推进（`getAndUpdate` + `maxOf`），所以：
+     * - 重复调用无副作用
+     * - 永远不会把计数器往回拨（那才会真的制造撞号）
+     *
+     * @param minExclusive 恢复的棋盘上最大的 tile id。传 0 或负数是 no-op。
+     */
+    fun seedAtLeast(minExclusive: Int) {
+        counter.getAndUpdate { current -> maxOf(current, minExclusive) }
+    }
+
+    /**
      * 仅供单元测试重置计数器，保证用例之间互不影响。
      *
      * **不要在产品代码中调用** —— 重置后可能与棋盘上存活的 tile 撞号，

@@ -186,4 +186,83 @@ class TileIdUniquenessTest {
         )
         assertEquals("预期 3 个 id 撞号", 3, collision.size)
     }
+
+    // ==================================================================
+    // seedAtLeast —— 断点续玩的防撞号机制
+    // ==================================================================
+
+    /**
+     * 恢复快照后必须同步计数器，否则新发的 id 会与恢复回来的 tile 撞号。
+     *
+     * 场景：玩家划掉应用 → 进程被杀（计数器归零）→ 重开 → 恢复快照，
+     * 棋盘上有 id 1..49 的 tile，而 `next()` 会从 1 重新发号。
+     *
+     * 撞号不会崩溃，但 Compose 用 id 当 key，两个同 id 的 tile 会被认成
+     * 同一个 —— 表现为动画在它们之间乱窜。
+     */
+    @Test
+    fun `seedAtLeast 之后新 id 不会与恢复的 tile 撞号`() {
+        // 模拟进程重启：计数器是全新的（setUp 已 reset）
+        val restoredIds = (1..49).toList()
+
+        TileIdGenerator.seedAtLeast(restoredIds.max())
+
+        val newIds = (1..20).map { TileIdGenerator.next() }
+        val collision = newIds.filter { it in restoredIds }
+        assertTrue(
+            "seedAtLeast 后新发的 id 不能与恢复的 tile 重合，实际撞号：$collision",
+            collision.isEmpty(),
+        )
+        assertEquals("应从 50 开始发号", 50, newIds.first())
+    }
+
+    @Test
+    fun `seedAtLeast 幂等，重复调用不影响后续发号`() {
+        TileIdGenerator.seedAtLeast(100)
+        TileIdGenerator.seedAtLeast(100)
+        TileIdGenerator.seedAtLeast(100)
+        assertEquals("重复 seed 到同一值不应额外消耗号段", 101, TileIdGenerator.next())
+    }
+
+    /**
+     * 绝不能把计数器往回拨 —— 那才会真的制造撞号。
+     */
+    @Test
+    fun `seedAtLeast 不会把计数器往回拨`() {
+        repeat(200) { TileIdGenerator.next() }   // 当前已到 200
+
+        TileIdGenerator.seedAtLeast(50)          // 试图倒退
+
+        assertEquals("计数器不能被拨回，下一个仍应是 201", 201, TileIdGenerator.next())
+    }
+
+    @Test
+    fun `seedAtLeast 对 0 和负数是 no-op`() {
+        TileIdGenerator.seedAtLeast(0)
+        assertEquals("空棋盘 maxTileId=0，不该影响发号", 1, TileIdGenerator.next())
+
+        TileIdGenerator.seedAtLeast(-100)
+        assertEquals("负数同样不该把计数器拨回", 2, TileIdGenerator.next())
+    }
+
+    /**
+     * 与 GameSnapshot.maxTileId 联动的完整链路。
+     */
+    @Test
+    fun `用快照的 maxTileId 播种后不撞号`() {
+        // 先造一块真棋盘，记下它的 id
+        val board = BoardEngine.generateInitialBoard()
+        val boardIds = idsOf(board).toSet()
+
+        // 模拟进程重启 + 从快照恢复
+        TileIdGenerator.resetForTest()
+        val snapshot = GameSnapshot(board = board, score = 0, combo = 0, remainingSeconds = 30)
+        TileIdGenerator.seedAtLeast(snapshot.maxTileId)
+
+        val newIds = (1..49).map { TileIdGenerator.next() }
+        assertTrue(
+            "恢复后补充的新 tile 不能与盘上现存 tile 撞号",
+            newIds.none { it in boardIds },
+        )
+    }
 }
