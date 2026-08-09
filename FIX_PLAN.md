@@ -28,8 +28,8 @@
 | D4 animFrame → BoardPresentation | ✅ | `468dd63` + `6a3957b` | **拆两半做**，见下 |
 | D5 静音三份拷贝 | ✅ | `56325a6` | PrefsRepository 单一数据源 |
 | D6 默认值 RNG | ✅ | `68229c7` | 默认空棋盘 |
-| D7 GameState 拆分 | ⏸️ 暂缓 | — | 现 18 字段；等新玩法触发 |
-| D8 DataStore 迁移 | ⏸️ 暂缓 | — | 等新持久化需求 |
+| D7 GameState 拆分 | ⏸️ 暂缓 | — | 实为 11 字段（原文 18 是 grep 把 KDoc 示例数进去了）；等新玩法触发 |
+| D8 DataStore 迁移 | ✅ | `6de3e28` + `9403494` + `ecffd33` | 分三步做，见下 |
 
 ### 与原方案的四处偏差（重要）
 
@@ -1114,6 +1114,68 @@ data class GameState(
 
 ---
 
+### ✅ 实施说明（2026-08-09，三个 commit）
+
+> ⚠️ 上面的「不建议单独排期」已过期。实际触发点不是性能，而是**迁移成本
+> 随设置项数量增长**：两个键时改一次很轻，等加了设置页再改就要动一大片。
+
+| commit | 内容 |
+|---|---|
+| `6de3e28` | 最高分规则提纯到 engine（`HighScoreRules`），11 例单测 |
+| `9403494` | `GameRecordCodec` 前向兼容，杜绝加字段清空历史 |
+| `ecffd33` | `PrefsRepository` 迁 DataStore + 启动窗口兜住预热 |
+
+**与正文方案的三处偏差：**
+
+**① 同步读接口保留，没有全改成 Flow**
+
+正文说 DataStore「天然 Flow + 协程 IO」，听起来该把接口都改成 suspend。
+实际不行 —— `soundPlayer.bindMutedProvider(prefsRepo::isMuted)` 在音效播放
+热路径上，每次 `play*` 都同步调，不可能挂起。
+
+所以做法是 **DataStore 落盘 + 内存热缓存**：`isMuted()` / `getHighScore()`
+读缓存（同步），落盘和订阅走 DataStore。结果是原有 5 个同步调用点
+**一处都没改**。
+
+**② `runBlocking` 预热是有意的，不是偷懒**
+
+`MagicSushiApp.onCreate` 里 `prefsRepo.warmUp()` 同步读一次。这与 D8 的
+初衷不矛盾：D8 要消除的是**散落、重复、不可控**的主线程 IO（旧实现任何
+一次 `getXxx()` 都可能读盘），而 warmUp 是一次性、边界明确、且被系统
+启动窗口完整遮住的。
+
+不预热的代价是 UI 先渲染占位值 0 再跳到真实值，玩家看到数字闪变。
+
+⚠️ **不能用自绘的 Compose 启动页代替系统启动窗口** —— 预热是主线程同步
+IO，期间 composition 同样被冻住，自绘页面一帧都画不出来，只会看到白屏。
+系统启动窗口由 WindowManager 在进程起来前绘制，不受主线程影响。
+依赖：`androidx.core:core-splashscreen:1.0.1`，主题 `Theme.MagicSushi.Splash`。
+
+**③ 顺带修了两个正文没提到的问题**
+
+- **codec 加字段会静默清空历史**：`decodeLine` 原本用 `parts.size != 3`
+  判定合法行，一旦给 `GameRecord` 追加第 4 个字段，老玩家每行只有 3 段，
+  全部被判非法丢弃。现改为 `>= MIN_FIELDS` + append-only 契约，双向兼容。
+  ⚠️ 原测试 `字段数不对的行被跳过` **明确断言多字段行应被丢弃**，
+  它固化的正是这个缺陷，已按新契约改写。
+
+- **庆祝动画误触发**：最高分异步装载后，`ScoreOverlay` 先收到占位 0 再收到
+  真实值，旧判据 `highScore > previousHigh` 把这次跳变当成破纪录，冷启动
+  进游戏就放一次庆祝。现用 `HighScoreRules.shouldCelebrateHighScore`
+  加「本局得过分」条件区分。
+
+**数据兼容**：`produceMigrations` 挂 `SharedPreferencesMigration`，
+首次创建 DataStore 时搬运 `magic_sushi_prefs.xml`。DataStore 键名刻意与
+旧键名一致 —— 迁移按 key 字符串匹配，改名等于丢老玩家数据。
+
+**扩展性**：新增泛型 `Setting<T>` 收口读写，加设置字段从「4 段样板」
+（常量 + getter + setter + Flow，且易漏 `_xxxFlow.value` 同步）变成一行
+`val volume = Setting(KEY_VOLUME, default = 100)`。
+
+**测试**：175 例全绿（engine 169 + app 6）。冷启动时序与渲染层需真机验证。
+
+---
+
 ## 数据层实施顺序
 
 > ✅ D1-D6 全部完成，D7/D8 按原判断暂缓。详见文档开头「实施结算」。
@@ -1127,7 +1189,7 @@ data class GameState(
 | 5 | D3 `Array` → `List` + 稳定性 | 🟡 性能+语义 | 2-3 小时 | 6+ 及全部测试 |
 | 6 | D4 `animFrame` → `BoardPresentation` | 🟡 类型安全 | 2 小时 | 3（与 P1-1/P1-4 合并做） |
 | 7 | D7 GameState 拆分 | 🟢 暂缓 | — | 等新玩法再动 |
-| 8 | D8 DataStore 迁移 | 🟢 暂缓 | — | 等新持久化需求 |
+| 8 | D8 DataStore 迁移 | ✅ 已完成 | 实际 3 个 commit | 见 D8 章节的实施说明 |
 
 ---
 
