@@ -147,8 +147,19 @@ class PrefsRepository(
          */
         val value: T get() = _flow.value
 
-        /** 写入并落盘。缓存由 [collectInto] 的订阅回灌，此处不手工赋值。 */
+        /**
+         * 写入并落盘。
+         *
+         * **缓存同步更新，落盘异步。** 这是热缓存必须有的语义：
+         * 调用方紧接着 `value` 读回来必须看到新值。
+         *
+         * ⚠️ 曾经这里只 `dataStore.edit{}`、缓存等 [collectInto] 的订阅回灌，
+         * 结果 `saveHighScore()` 之后立刻 `getHighScore()` 读到的还是旧值
+         * —— 最高分表现为「不更新」。订阅回灌是**兜底**（同步别处的写入），
+         * 不能当作本次写入的生效路径。
+         */
         suspend fun set(newValue: T) {
+            _flow.value = newValue
             dataStore.edit { it[key] = newValue }
         }
 
@@ -164,6 +175,16 @@ class PrefsRepository(
 
         internal fun seed(prefs: Preferences) {
             _flow.value = read(prefs)
+        }
+
+        /**
+         * 只更新内存缓存，不落盘。
+         *
+         * 供 [saveHighScore] 这类「先做同步守卫、再异步落盘」的写入路径使用：
+         * 缓存必须在函数返回前生效，否则紧随其后的同步读会拿到旧值。
+         */
+        internal fun setCachedValue(newValue: T) {
+            _flow.value = newValue
         }
 
         /** 在一次 `edit` 事务里就地改值，供 [Setting] 之外的组合写入复用。 */
@@ -236,11 +257,19 @@ class PrefsRepository(
      * 保存新最高分（**只升不降**，规则见
      * [HighScoreRules.isNewRecord]）。
      *
-     * 比较在 `edit` 事务内部重做一次：调用方传进来的判断可能基于稍旧的
-     * 缓存值，而事务内读到的是权威值，可防并发写覆盖（例如 game over
-     * 与 quit 几乎同时触发）。
+     * 缓存**同步**更新，落盘异步 —— 调用方（`GameViewModel.onGameOver`）
+     * 紧接着就会读 `getHighScore()`，等协程跑完再更新会让最高分表现为
+     * 「不更新」：弹窗里是对的（那读的是 state），但回菜单再进或杀进程
+     * 重开就丢了。
+     *
+     * 事务内再比较一次：调用方的判断基于稍旧的缓存值，而事务内读到的是
+     * 权威值，可防并发写覆盖（例如 game over 与 quit 几乎同时触发）。
      */
     fun saveHighScore(score: Int) {
+        // 同步守卫 + 同步更新缓存：只升不降的语义在内存里也必须成立。
+        if (!HighScoreRules.isNewRecord(score, highScore.value)) return
+        highScore.setCachedValue(score)
+
         scope.launch {
             dataStore.edit { prefs ->
                 val current = highScore.read(prefs)
@@ -251,8 +280,15 @@ class PrefsRepository(
         }
     }
 
-    /** 设置静音状态。落盘异步，缓存由订阅回灌。 */
+    /**
+     * 设置静音状态。
+     *
+     * 缓存同步更新（[Setting.set] 保证），落盘异步。这一点对
+     * `toggleMute()` 是必需的 —— 它按 `!isMuted()` 计算目标值，
+     * 若缓存滞后，连续两次切换会读到同一个旧值而失效。
+     */
     fun setMuted(isMuted: Boolean) {
+        muted.setCachedValue(isMuted)
         scope.launch { muted.set(isMuted) }
     }
 
