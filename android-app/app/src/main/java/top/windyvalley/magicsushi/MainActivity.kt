@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -83,6 +84,20 @@ class MainActivity : ComponentActivity() {
                 // 切后台一律暂停：即使在菜单屏，暂停一个没在跑的 timer 也是
                 // 无害的 no-op（onPause 只是置 phase + cancel）。
                 Lifecycle.Event.ON_PAUSE -> viewModel.onPause()
+
+                // ON_STOP 是「进程可能马上消失」前最后一个保证执行的回调。
+                //
+                // 从任务列表划掉应用时：
+                //     ON_PAUSE → ON_STOP → （系统随时可杀，不保证 onDestroy）
+                //
+                // 所以对局快照必须在这里同步写完（onStopWithSnapshot 内部
+                // 阻塞等落盘）。放 onDestroy 或 ViewModel.onCleared 都不行 ——
+                // 那两个在划掉应用时通常根本不会执行。
+                //
+                // ⚠️ 不要因为「ON_PAUSE 已经暂停过了」就把这里合并进去：
+                // ON_PAUSE 还会在弹对话框、切分屏等**不会杀进程**的场景触发，
+                // 那些时候没必要付同步 IO 的代价。
+                Lifecycle.Event.ON_STOP -> viewModel.onStopWithSnapshot()
 
                 // 恢复要看当前在哪个屏 —— 在菜单/历史屏时不能恢复倒计时。
                 Lifecycle.Event.ON_RESUME -> viewModel.onSystemResume(isOnGameScreen)
@@ -157,6 +172,29 @@ private fun AppRoot(
         mutableStateOf(AppScreen.Menu)
     }
 
+    // 进游戏屏时是「开新局」还是「恢复上次对局」。
+    //
+    // ⚠️ 必须有这个开关：AppScreen.Game 分支里的 LaunchedEffect 会调
+    // startGame()，那会用新棋盘覆盖刚恢复的现场。两种进入方式共用一个
+    // 屏幕，但初始化动作互斥。
+    //
+    // 不用 rememberSaveable：它只在一次导航中有意义，配置变更后应回到
+    // 默认的「开新局」—— 恢复动作此时早已完成（快照已被消费）。
+    var resumeSavedRound by remember { mutableStateOf(false) }
+
+    // 菜单上是否显示「继续上局」。
+    //
+    // 每次回到菜单都重新查一次：玩家可能刚打完一局（快照已被清），
+    // 也可能刚被中断（快照刚写入）。
+    var hasSavedRound by remember { mutableStateOf(false) }
+    LaunchedEffect(screen) {
+        hasSavedRound = if (screen == AppScreen.Menu) {
+            viewModel.hasRestorableSnapshot()
+        } else {
+            false
+        }
+    }
+
     // 把导航状态单向同步给 Activity（供 composition 外的生命周期观察者读）。
     LaunchedEffect(screen) { onScreenChanged(screen) }
 
@@ -167,17 +205,32 @@ private fun AppRoot(
             BackHandler { onExitApp() }
 
             MainMenuScreen(
-                onStartGame = { screen = AppScreen.Game },
+                onStartGame = {
+                    resumeSavedRound = false
+                    screen = AppScreen.Game
+                },
                 onHistory = { screen = AppScreen.History },
                 onExit = onExitApp,
+                hasSavedRound = hasSavedRound,
+                onContinueGame = {
+                    resumeSavedRound = true
+                    screen = AppScreen.Game
+                },
             )
         }
 
         AppScreen.Game -> {
-            // 进入游戏屏即开新局。key 用 Unit：本 LaunchedEffect 随
-            // AppScreen.Game 分支进入 composition 而启动、离开而取消，
-            // 所以每次「菜单 → 游戏」都会重新执行一次。
-            LaunchedEffect(Unit) { viewModel.startGame() }
+            // 进入游戏屏：恢复上次对局，或开新局。
+            //
+            // key 用 Unit：本 LaunchedEffect 随 AppScreen.Game 分支进入
+            // composition 而启动、离开而取消，所以每次「菜单 → 游戏」都会
+            // 重新执行一次。
+            LaunchedEffect(Unit) {
+                // 恢复失败（快照在这期间被清掉、或内容不可恢复）时兜底开新局
+                // —— 绝不能让玩家停在一个空棋盘上。
+                val restored = resumeSavedRound && viewModel.restoreSnapshot()
+                if (!restored) viewModel.startGame()
+            }
 
             // 游戏中按返回键 = 暂停，而不是直接退出。
             // 玩家在玩的时候误触返回键丢掉一局是很糟的体验。

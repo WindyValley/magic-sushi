@@ -331,6 +331,14 @@ class GameViewModel(
         // ⚠️ 顺序要紧：调用方（onRestart / onQuit）必须**先**写旧局成绩
         // 再调 startGame，否则这里一复位就再也认不出「旧局还没入库」。
         currentRoundRecorded = false
+        // 开新局 = 放弃上一局的中断现场。
+        //
+        // 这是所有「新局」的唯一入口（onRestart 重开、菜单「开始新游戏」
+        // 都走这里），所以清快照放这一处就够，不必在每个调用方重复。
+        //
+        // 不清的后果：玩家重开一局后退出，菜单仍显示「继续上局」，点进去
+        // 回到的是**更早那一局**的残局。
+        viewModelScope.launch { snapshotRepo.clear() }
         _state.update {
             GameState(
                 board = BoardEngine.generateInitialBoard(),
@@ -442,6 +450,13 @@ class GameViewModel(
 
         if (!hadUnsettledScore) {
             // 没有实际写盘动作，直接回调。
+            //
+            // ⚠️ 但快照必须清：玩家主动退出意味着「这局结束了」，即使 0 分
+            // 不入库也一样。不清会让菜单继续显示「继续上局」，点进去回到一个
+            // 玩家已经放弃的残局。
+            //
+            // 得分 > 0 的路径由 recordCurrentRound 入库后一并清，不必重复。
+            viewModelScope.launch { snapshotRepo.clear() }
             onRecorded()
             return
         }

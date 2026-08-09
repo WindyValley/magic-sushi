@@ -61,6 +61,8 @@ fun MainMenuScreen(
     onStartGame: () -> Unit,
     onHistory: () -> Unit,
     onExit: () -> Unit,
+    hasSavedRound: Boolean = false,
+    onContinueGame: () -> Unit = {},
 ) {
     Box(
         modifier = Modifier
@@ -104,24 +106,75 @@ fun MainMenuScreen(
 
             Spacer(modifier = Modifier.height(56.dp))
 
-            // ---- 主操作：开始游戏 ----
-            Button(
-                onClick = onStartGame,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFFE85D2F),
-                    contentColor = Color.White,
-                ),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .widthIn(max = 320.dp),
-            ) {
-                Text(
-                    text = "开始游戏",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(vertical = 10.dp),
-                )
+            // ---- 继续上次对局（仅在有快照时出现）----
+            //
+            // 有快照时它是**主操作**（实心橙），「开始游戏」降级为次操作：
+            // 玩家上次是被中断的，最可能想接着玩那一局。若把「开始游戏」
+            // 继续放在主位，很容易误触而丢掉残局 —— 而快照是恢复即消费的，
+            // 丢了就没了。
+            if (hasSavedRound) {
+                Button(
+                    onClick = onContinueGame,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFE85D2F),
+                        contentColor = Color.White,
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 320.dp),
+                ) {
+                    Text(
+                        text = "继续上局",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 10.dp),
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+            }
+
+            // ---- 开始新游戏 ----
+            //
+            // 有快照时降为描边样式（次操作）：点它会开新局，那个残局就
+            // 永久消失了 —— 视觉上不该和「继续上局」等权重。
+            if (hasSavedRound) {
+                OutlinedButton(
+                    onClick = onStartGame,
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Color(0xFFFFE8C5),
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 320.dp),
+                ) {
+                    Text(
+                        text = "开始新游戏",
+                        fontSize = 17.sp,
+                        modifier = Modifier.padding(vertical = 8.dp),
+                    )
+                }
+            } else {
+                Button(
+                    onClick = onStartGame,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFE85D2F),
+                        contentColor = Color.White,
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 320.dp),
+                ) {
+                    Text(
+                        text = "开始游戏",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 10.dp),
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(14.dp))
@@ -173,5 +226,20 @@ fun MainMenuScreen(
 private fun MainMenuScreenPreview() {
     MagicSushiTheme {
         MainMenuScreen(onStartGame = {}, onHistory = {}, onExit = {})
+    }
+}
+
+/** 有中断对局时的菜单：「继续上局」占主位，「开始新游戏」降为次操作。 */
+@Preview(showBackground = true, name = "菜单 - 有中断对局")
+@Composable
+private fun MainMenuScreenWithSavedRoundPreview() {
+    MagicSushiTheme {
+        MainMenuScreen(
+            onStartGame = {},
+            onHistory = {},
+            onExit = {},
+            hasSavedRound = true,
+            onContinueGame = {},
+        )
     }
 }
