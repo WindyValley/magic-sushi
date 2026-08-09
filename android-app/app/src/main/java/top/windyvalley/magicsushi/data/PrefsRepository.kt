@@ -292,6 +292,19 @@ class PrefsRepository(
         scope.launch { muted.set(isMuted) }
     }
 
+    /**
+     * 挂起直到此前发起的写入都已落盘。
+     *
+     * 供「退出前必须确保成绩保存」这类场景使用（`GameViewModel.onQuit`）。
+     *
+     * 实现依赖 DataStore 的 `edit` 内部串行化：发起一次读并等它完成，
+     * 说明排在它之前的写入都已结束。这比暴露 Job 列表简单，也不用担心
+     * 漏等某个协程。
+     */
+    suspend fun awaitPendingWrites() {
+        dataStore.data.first()
+    }
+
     companion object {
         // 键名与旧 SharedPreferences 保持一致，让 SharedPreferencesMigration
         // 能原样搬过来（它按 key 字符串匹配）。改名就等于丢老数据。

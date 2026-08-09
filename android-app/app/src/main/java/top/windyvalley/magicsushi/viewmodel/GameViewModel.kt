@@ -24,6 +24,7 @@ import top.windyvalley.magicsushi.engine.GameEvent
 import top.windyvalley.magicsushi.engine.GameRecord
 import top.windyvalley.magicsushi.engine.GravityEngine
 import top.windyvalley.magicsushi.engine.HighScoreRules
+import top.windyvalley.magicsushi.engine.RoundSettlement
 import top.windyvalley.magicsushi.engine.GamePhase
 import top.windyvalley.magicsushi.engine.GameState
 import top.windyvalley.magicsushi.engine.MatchEngine
@@ -356,18 +357,43 @@ class GameViewModel(
      * 注意 [onQuit] 里对此有额外处理（等写完再退出进程）。
      */
     private fun recordCurrentRound() {
-        if (currentRoundRecorded) return
-        val score = _state.value.score
-        if (score <= 0) {
-            // 0 分也算「已处理」，免得后续路径反复检查。
-            currentRoundRecorded = true
-            return
-        }
+        // 结算规则在 engine 的 RoundSettlement 里（纯函数、有测试覆盖）。
+        //
+        // ⚠️ 曾经 saveHighScore 只在 onGameOver（倒计时归零）里调用，而
+        // recordCurrentRound 有三个调用方（onGameOver / onRestart / onQuit）。
+        // 于是正常退出、点重开这两条路径只写历史、不存最高分 —— 玩家看到
+        // 「历史记录有成绩，但最高分一直是 0」，且历史里的「新纪录」标记
+        // 也永远是 false（isNewRecord 当时只在 onGameOver 里被赋值）。
+        //
+        // 现在「结算一局」是一个不可分割的动作，三条路径共用，不存在
+        // 「某条路径记得做 A 忘了做 B」的空间。
+        val outcome = RoundSettlement.settle(
+            score = _state.value.score,
+            savedHighScore = prefsRepo.getHighScore(),
+            alreadyRecorded = currentRoundRecorded,
+        )
+
+        // 无论是否入库都标记为已处理，免得后续路径反复检查。
         currentRoundRecorded = true
+
+        if (outcome.isNewRecord) {
+            prefsRepo.saveHighScore(outcome.newHighScore)
+            // 一次性庆祝效果（音效、撒花）消费此事件。
+            _events.tryEmit(GameEvent.NewRecord(outcome.newHighScore))
+        }
+        _state.update {
+            it.copy(
+                highScore = outcome.newHighScore,
+                isNewRecord = outcome.isNewRecord,
+            )
+        }
+
+        if (!outcome.shouldRecord) return
+
         val record = GameRecord(
-            score = score,
+            score = _state.value.score,
             timestampMillis = System.currentTimeMillis(),
-            isNewRecord = _state.value.isNewRecord,
+            isNewRecord = outcome.isNewRecord,
         )
         viewModelScope.launch {
             historyRepo.addRecord(record)
@@ -399,24 +425,31 @@ class GameViewModel(
      *                   不可逆操作应放在这里，避免写盘被进程终止打断。
      */
     fun onQuit(onRecorded: () -> Unit = {}) {
-        val alreadyRecorded = currentRoundRecorded
-        val score = _state.value.score
+        val hadUnsettledScore = !currentRoundRecorded && _state.value.score > 0
         recordCurrentRound()
         timerJob?.cancel()
         swapJob?.cancel()
         _state.update { it.copy(phase = GamePhase.IDLE) }
 
-        if (alreadyRecorded || score <= 0) {
+        if (!hadUnsettledScore) {
             // 没有实际写盘动作，直接回调。
             onRecorded()
-        } else {
-            // 等写盘完成 —— 与 recordCurrentRound 里那个 launch 是两个协程，
-            // 但 DataStore 的 edit 有内部串行化，所以这个 launch 排在后面
-            // 执行完时，前一个写入必然已落盘。
-            viewModelScope.launch {
-                historyRepo.getRecordsOnce()
-                onRecorded()
-            }
+            return
+        }
+
+        // 等两个仓库都落盘再回调。
+        //
+        // ⚠️ 不能只等 historyRepo：最高分走的是 prefsRepo，且用的是
+        // appScope（与 viewModelScope 无关）。若 UI 借这个回调退出进程，
+        // 只等历史会让最高分的写入被进程终止打断 —— 表现为「退出前破的
+        // 纪录没保存」。
+        //
+        // 两者都靠「DataStore 的 edit 内部串行化」这一性质：后发起的读
+        // 完成时，先发起的写必然已落盘。
+        viewModelScope.launch {
+            historyRepo.getRecordsOnce()
+            prefsRepo.awaitPendingWrites()
+            onRecorded()
         }
     }
 
@@ -863,32 +896,13 @@ class GameViewModel(
      * (idempotent, no harm).
      */
     private fun onGameOver() {
-        val finalScore = _state.value.score
-        val oldHigh = prefsRepo.getHighScore()
-        // FIX_PLAN D8：与 ScoreOverlay 的庆祝判据共用 engine 里的同一套规则，
-        // 避免「破纪录」这个概念在 UI 和 VM 各写一份后悄悄分叉。
-        val isNew = HighScoreRules.isNewRecord(finalScore, oldHigh)
-        if (isNew) prefsRepo.saveHighScore(finalScore)
-
-        _state.update {
-            it.copy(
-                phase = GamePhase.GAME_OVER,
-                highScore = if (isNew) finalScore else oldHigh,
-                isNewRecord = isNew,
-            )
-        }
-
-        // isNewRecord 保留在 state 里供 GameOverDialog 渲染（它是对话框存续
-        // 期间的持续状态）；这里额外发一次事件，供一次性庆祝效果（音效、
-        // 撒花动画）消费。
-        if (isNew) {
-            _events.tryEmit(GameEvent.NewRecord(finalScore))
-        }
-
-        // 写入历史记录。
+        // 最高分结算与历史入库都在 recordCurrentRound 里（它是幂等的），
+        // 三条退出路径共用同一套结算逻辑 —— 这里不再单独处理最高分。
         //
-        // ⚠️ 必须放在上面那个 _state.update 之后：recordCurrentRound 会读
-        // state.isNewRecord 填进记录，放前面读到的是上一局的值。
+        // ⚠️ phase 必须先落定：GameOverDialog 依赖它显示，而 recordCurrentRound
+        // 内部会 _state.update 写 highScore / isNewRecord，两次 update 无先后
+        // 依赖，但 phase 先写能保证任何时刻观察到的 state 都是自洽的。
+        _state.update { it.copy(phase = GamePhase.GAME_OVER) }
         recordCurrentRound()
     }
 
