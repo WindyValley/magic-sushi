@@ -164,7 +164,7 @@ fun HistoryScreen(
 /**
  * 单条历史记录。
  *
- * 布局：排名 | 分数（+ 新纪录标记） | 时间
+ * 布局：排名 | 分数 | 时间
  *
  * @param index 0-based 下标，用于渲染排名
  */
@@ -193,25 +193,29 @@ private fun HistoryRow(index: Int, record: GameRecord) {
 
         Spacer(modifier = Modifier.width(10.dp))
 
-        Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = record.score.toString(),
-                    color = Color(0xFFFFB347),
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                if (record.isNewRecord) {
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "🏆 新纪录",
-                        color = Color(0xFFFFD700),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-            }
-        }
+        // 分数。weight(1f) 吃掉中间的剩余空间，把时间推到最右侧。
+        //
+        // 这里曾经是 Column + Row 包着分数与「🏆 新纪录」标记。标记删除后
+        // 嵌套就没有意义了，直接放 Text —— 原因见下：
+        //
+        // 列表按分数降序排列（GameHistory.addRecord），第一行**必然**是当前
+        // 最高分，而 rankLabel 已经给它发了 🥇。「谁是最高分」已由排序和奖牌
+        // 表达过两次，再加一个 🏆 是第三次。
+        //
+        // 且 isNewRecord 是**入库时刻的快照**（"这一局打破了当时的纪录"），
+        // 不等于"现在仍是最高分"。新手期几乎每局都在破纪录，满屏 🏆 反而把
+        // 真正有信号的 🥇 淹掉了。
+        //
+        // 数据字段保留：codec 是 append-only 格式（GameRecordCodec），删字段
+        // 会动存储契约；且 GameOverDialog 仍要用「本局破纪录」做结算瞬间的
+        // 一次性庆祝 —— 那与列表的排行语义是两回事。
+        Text(
+            text = record.score.toString(),
+            color = Color(0xFFFFB347),
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f),
+        )
 
         Text(
             text = HistoryFormatter.formatTimestamp(record.timestampMillis),
@@ -224,6 +228,9 @@ private fun HistoryRow(index: Int, record: GameRecord) {
 @Preview(showBackground = true)
 @Composable
 private fun HistoryScreenPreview() {
+    // isNewRecord 仍是数据模型的一部分（GameOverDialog 用它做结算瞬间的
+    // 庆祝），但历史列表**刻意不渲染**它 —— 排序已按分数降序，🥇 就是
+    // 当前最高分。所以这里第一条的 true 在预览里看不到任何标记，是预期行为。
     val sample = listOf(
         GameRecord(score = 2480, timestampMillis = 1786000000000L, isNewRecord = true),
         GameRecord(score = 1920, timestampMillis = 1785900000000L, isNewRecord = false),
