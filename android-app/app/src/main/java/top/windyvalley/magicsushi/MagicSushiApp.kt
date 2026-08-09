@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import top.windyvalley.magicsushi.audio.SoundPlayer
 import top.windyvalley.magicsushi.data.HistoryRepository
 import top.windyvalley.magicsushi.data.PrefsRepository
+import top.windyvalley.magicsushi.data.SnapshotRepository
 
 /**
  * MagicSushiApp — Application 类，同时充当极简的依赖容器。
@@ -61,6 +62,14 @@ class MagicSushiApp : Application() {
      * （FIX_PLAN D8 完成后不再有 SharedPreferences）。
      */
     val historyRepo: HistoryRepository by lazy { HistoryRepository(this) }
+
+    /**
+     * 对局快照仓库（断点续玩）。
+     *
+     * 与上面两个仓库按**数据生命周期**划分：这个存「一局进行中的现场」，
+     * 单份、恢复即删；那两个存永久档案。详见 [SnapshotRepository] 的类文档。
+     */
+    val snapshotRepo: SnapshotRepository by lazy { SnapshotRepository(this) }
 
     /** 应用级音效播放器。静音状态从 [prefsRepo] 读取，自身不持有该状态。 */
     val soundPlayer: SoundPlayer by lazy { SoundPlayer(this) }

@@ -17,10 +17,13 @@ import kotlinx.coroutines.launch
 import top.windyvalley.magicsushi.audio.SoundPlayer
 import top.windyvalley.magicsushi.data.HistoryRepository
 import top.windyvalley.magicsushi.data.PrefsRepository
+import top.windyvalley.magicsushi.data.SnapshotRepository
 import top.windyvalley.magicsushi.engine.BoardEngine
 import top.windyvalley.magicsushi.engine.AnimationEngine
 import top.windyvalley.magicsushi.engine.CascadeEngine
 import top.windyvalley.magicsushi.engine.GameEvent
+import top.windyvalley.magicsushi.engine.GameSnapshot
+import top.windyvalley.magicsushi.engine.TileIdGenerator
 import top.windyvalley.magicsushi.engine.GameRecord
 import top.windyvalley.magicsushi.engine.GravityEngine
 import top.windyvalley.magicsushi.engine.HighScoreRules
@@ -146,6 +149,7 @@ class GameViewModel(
     private val prefsRepo: PrefsRepository,
     private val historyRepo: HistoryRepository,
     private val soundPlayer: SoundPlayer,
+    private val snapshotRepo: SnapshotRepository,
 ) : ViewModel() {
 
     // ========================================================================
@@ -397,6 +401,11 @@ class GameViewModel(
         )
         viewModelScope.launch {
             historyRepo.addRecord(record)
+            // 本局已结算入库 → 中断快照作废。
+            //
+            // ⚠️ 不清会留下一个「已经入过库」的残局：玩家下次启动被拉回
+            // 那个现场，玩完却因幂等保护不再入库，等于白玩一局。
+            snapshotRepo.clear()
         }
     }
 
@@ -504,6 +513,115 @@ class GameViewModel(
         _state.update { it.copy(phase = GamePhase.PAUSED) }
         timerJob?.cancel()
     }
+
+    // ========================================================================
+    // 对局快照（断点续玩）
+    // ========================================================================
+
+    /**
+     * 暂停并**同步**保存对局快照。
+     *
+     * 由 `MainActivity` 在 `ON_STOP` 调用 —— 那是「进程可能马上消失」前
+     * 最后一个保证会执行的回调（`onDestroy` / `onCleared` 在从任务列表
+     * 划掉应用时都不保证被调用）。
+     *
+     * ## 为什么同步
+     *
+     * `ON_STOP` 返回之后系统随时可杀进程，异步落盘会被打断。此刻界面
+     * 已退到后台，阻塞几十毫秒无人感知。取舍同 `PrefsRepository.warmUp`。
+     *
+     * ## 什么情况下不存
+     *
+     * 只有**进行中的对局**才值得存。已结算（currentRoundRecorded）的局
+     * 若也存快照，玩家下次进来会被拉回一个**已经入过库**的残局 ——
+     * 继续玩完还会因幂等保护而不再入库，等于白玩一局。
+     */
+    fun onStopWithSnapshot() {
+        onPause()
+
+        val s = _state.value
+        val snapshot = GameSnapshot(
+            board = s.board,
+            score = s.score,
+            combo = s.combo,
+            remainingSeconds = s.remainingSeconds,
+        )
+
+        // 只存真正进行中且未结算的对局。
+        //
+        // isRestorable 挡掉空棋盘和已耗尽的计时器；currentRoundRecorded
+        // 挡掉「已经算过成绩」的局（game over 后停在结算弹窗、或已退出）。
+        val worthSaving = !currentRoundRecorded &&
+            s.phase != GamePhase.IDLE &&
+            s.phase != GamePhase.GAME_OVER &&
+            snapshot.isRestorable
+
+        if (worthSaving) {
+            snapshotRepo.saveBlocking(snapshot)
+        } else {
+            // 主动清掉旧快照：否则「上次中断留下的快照」会在这次
+            // 已结算/未开局的情况下残留，下次启动恢复出过期现场。
+            snapshotRepo.clearBlocking()
+        }
+    }
+
+    /**
+     * 尝试恢复上次中断的对局。
+     *
+     * @return `true` 表示已恢复（调用方应直接进游戏屏），`false` 表示
+     *         没有可恢复的快照。
+     *
+     * ## 恢复后是暂停态
+     *
+     * 玩家切回来需要重新建立注意力，直接跑计时器不公平（用户决定）。
+     * 复用现有的 [GamePhase.PAUSED] UI，零额外工作。
+     *
+     * ## 恢复即消费
+     *
+     * 读到就删。快照的语义是「有一局被中断了」，恢复之后这个事实就不
+     * 成立了。不删会导致玩家正常玩完这局、下次进游戏又被拉回残局。
+     */
+    suspend fun restoreSnapshot(): Boolean {
+        val snapshot = snapshotRepo.load() ?: return false
+        if (!snapshot.isRestorable) {
+            // 格式合法但内容无意义（空棋盘 / 时间耗尽）—— 清掉，当作没有。
+            snapshotRepo.clear()
+            return false
+        }
+
+        // ⚠️ 必须先同步 tile id 计数器再把棋盘交给 UI。
+        //
+        // 计数器活在内存里，进程重启即归零。恢复的棋盘带着旧 id，若不
+        // 播种，后续 spawnRefill 会从 1 重新发号并与盘上 tile 撞号 ——
+        // Compose 用 id 当 key，撞号表现为动画在两个 tile 之间乱窜。
+        TileIdGenerator.seedAtLeast(snapshot.maxTileId)
+
+        timerJob?.cancel()
+        swapJob?.cancel()
+        roundGeneration++
+        // 恢复的是一局**尚未结算**的对局 —— 它当初就是被中断的。
+        currentRoundRecorded = false
+
+        _state.update {
+            GameState(
+                board = snapshot.board,
+                score = snapshot.score,
+                combo = snapshot.combo,
+                remainingSeconds = snapshot.remainingSeconds,
+                phase = GamePhase.PAUSED,
+                isMuted = prefsRepo.isMuted(),
+                highScore = prefsRepo.getHighScore(),
+            )
+        }
+
+        // 恢复即消费。
+        snapshotRepo.clear()
+        return true
+    }
+
+    /** 是否存在可恢复的对局快照。供启动时决定要不要显示「继续游戏」。 */
+    suspend fun hasRestorableSnapshot(): Boolean =
+        snapshotRepo.load()?.isRestorable == true
 
     /**
      * Activity is back in the foreground. If we were paused, flip back to

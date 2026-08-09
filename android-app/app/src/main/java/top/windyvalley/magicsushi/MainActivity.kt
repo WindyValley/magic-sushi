@@ -38,7 +38,7 @@ class MainActivity : ComponentActivity() {
         get() = application as MagicSushiApp
 
     private val viewModel: GameViewModel by viewModels {
-        GameViewModelFactory(app.prefsRepo, app.historyRepo, app.soundPlayer)
+        GameViewModelFactory(app.prefsRepo, app.historyRepo, app.soundPlayer, app.snapshotRepo)
     }
 
     /**

@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import top.windyvalley.magicsushi.audio.SoundPlayer
 import top.windyvalley.magicsushi.data.HistoryRepository
 import top.windyvalley.magicsushi.data.PrefsRepository
+import top.windyvalley.magicsushi.data.SnapshotRepository
 
 /**
  * GameViewModelFactory.kt — manual DI for [GameViewModel].
@@ -99,6 +100,7 @@ class GameViewModelFactory(
     private val prefsRepo: PrefsRepository,
     private val historyRepo: HistoryRepository,
     private val soundPlayer: SoundPlayer,
+    private val snapshotRepo: SnapshotRepository,
 ) : ViewModelProvider.Factory {
 
     /**
@@ -126,7 +128,7 @@ class GameViewModelFactory(
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(GameViewModel::class.java)) {
-            return GameViewModel(prefsRepo, historyRepo, soundPlayer) as T
+            return GameViewModel(prefsRepo, historyRepo, soundPlayer, snapshotRepo) as T
         }
         throw IllegalArgumentException(
             "Unknown ViewModel class: ${modelClass.name}"
