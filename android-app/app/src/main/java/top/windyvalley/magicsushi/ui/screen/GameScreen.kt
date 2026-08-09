@@ -139,17 +139,17 @@ fun GameScreen(
             onResume = { viewModel.onResume() },
             onRestart = { viewModel.onRestart() },
             onQuit = {
-                // 退出：先让 VM 把成绩写入历史，写完再回主菜单。
+                // 暂停面板的「退出」= **挂起这一局**，不是结束它。
                 //
-                // ⚠️ 顺序要紧。DataStore 的写是异步的 —— 不等回调就切屏，
-                // 玩家立刻去看历史记录可能看不到刚打的这局。这正是用户报的
-                // 「退出时成绩没进历史」的一半原因（另一半是历史功能
-                // 根本不存在）。
+                // 刻意不走 viewModel.onQuit：那个会结算入库 + 清快照。
+                // 玩家在暂停时退出的意图是「先放着，待会儿接着玩」，若
+                // 此时结算：
+                //   1. 一局玩两半会在历史里留下两条记录
+                //   2. 结算顺带清快照 → 回到菜单没有「继续上局」，那局没了
                 //
-                // 批次 C 把 onQuit 的语义从「结束进程」换成了「回主菜单」，
-                // VM 侧一行未动 —— 因为 VM 只负责写完成绩后回调，
-                // 「回调里做什么」始终是 UI 的决定。
-                viewModel.onQuit(onRecorded = onQuit)
+                // onSuspendToMenu 只写快照不结算，且同步落盘后才回调 ——
+                // 保证菜单查 hasRestorableSnapshot 时快照已经在盘上。
+                viewModel.onSuspendToMenu(onSuspended = onQuit)
             },
         )
     }

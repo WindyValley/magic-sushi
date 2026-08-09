@@ -20,13 +20,23 @@ import androidx.compose.ui.window.DialogProperties
 
 /**
  * 暂停对话框。
- * 
+ *
  * 显示当前分数、剩余时间，并提供三个操作：
  * - 继续：onResume()
- * - 重玩：onRestart()
- * - 退出：onQuit()（关闭弹窗 + 自定义退出逻辑）
- * 
+ * - 重玩：onRestart()（放弃这一局，开新局）
+ * - 保留并返回首页：onQuit()
+ *
+ * ## 「保留并返回首页」不是「退出」
+ *
+ * 这个按钮**不结算成绩**，只把当前对局存成快照后回菜单，玩家可以从
+ * 菜单的「继续上局」原样回来。所以文案刻意不叫「退出」——那会让玩家
+ * 以为这局作废了，从而不敢点。
+ *
+ * 真正结束一局只有三条路：倒计时归零、点「重新开始」、在结算弹窗上
+ * 返回菜单。
+ *
  * 暂停时游戏计时器已停止，恢复时由 GameViewModel.onResume() 重新启动。
+ * 从后台切回来也停在暂停态，需玩家手动点「继续」（不自动恢复）。
  */
 @Composable
 fun PauseDialog(
@@ -141,7 +151,7 @@ fun PauseDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "退出",
+                        text = "保留并返回首页",
                         fontSize = 14.sp,
                         modifier = Modifier.padding(vertical = 4.dp)
                     )

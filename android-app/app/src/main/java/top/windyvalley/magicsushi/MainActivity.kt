@@ -99,7 +99,14 @@ class MainActivity : ComponentActivity() {
                 // 那些时候没必要付同步 IO 的代价。
                 Lifecycle.Event.ON_STOP -> viewModel.onStopWithSnapshot()
 
-                // 恢复要看当前在哪个屏 —— 在菜单/历史屏时不能恢复倒计时。
+                // 回到前台**不自动继续对局**，停在暂停态等玩家手动点「继续」。
+                //
+                // 玩家切回来注意力不在棋盘上（刚回完消息、刚看完通知），
+                // 倒计时立刻跑起来等于凭空吃掉几秒 —— 这是 60 秒计时的游戏，
+                // 几秒是实打实的损失。
+                //
+                // 这个接线点刻意保留（而非删掉调用）：让「什么都不做」是一个
+                // 显式决定而非遗漏，将来要加恢复提示音之类的落点也在这里。
                 Lifecycle.Event.ON_RESUME -> viewModel.onSystemResume(isOnGameScreen)
 
                 else -> { /* no-op for other events */ }

@@ -269,6 +269,26 @@ class GameViewModel(
      */
     private var currentRoundRecorded = false
 
+    /**
+     * 本局是否已通过「保留并返回首页」挂起。
+     *
+     * ## 为什么需要它
+     *
+     * [onSuspendToMenu] 会故意存下快照，同时把 phase 置成 IDLE（离开游戏屏
+     * 后不该停在 PAUSED）。但 [onStopWithSnapshot] 判定「不值得存」时会
+     * **主动清快照**，而 IDLE 正是它的排除条件之一。
+     *
+     * 于是没有这个标记就会出现：玩家点「保留并返回首页」→ 在菜单划掉应用
+     * → ON_STOP 看到 phase == IDLE → 把刚刚保留的那一局清掉。
+     *
+     * 换句话说，phase 单独无法区分两种 IDLE：
+     * - 从没开局 / 已结算退出 → 该清快照
+     * - 挂起后回菜单 → 必须保住快照
+     *
+     * 由 [startGame]（开新局）和 [restoreSnapshot]（快照已被消费）复位。
+     */
+    private var roundSuspendedToMenu = false
+
     init {
         // FIX_PLAN D5：把音效的静音判断绑定到 PrefsRepository —— 静音状态的
         // 唯一数据源。SoundPlayer 自己不再存一份，避免 toggleMute 时漏同步。
@@ -331,6 +351,8 @@ class GameViewModel(
         // ⚠️ 顺序要紧：调用方（onRestart / onQuit）必须**先**写旧局成绩
         // 再调 startGame，否则这里一复位就再也认不出「旧局还没入库」。
         currentRoundRecorded = false
+        // 开新局 → 之前的「挂起」状态作废。
+        roundSuspendedToMenu = false
         // 开新局 = 放弃上一局的中断现场。
         //
         // 这是所有「新局」的唯一入口（onRestart 重开、菜单「开始新游戏」
@@ -415,6 +437,8 @@ class GameViewModel(
             // 那个现场，玩完却因幂等保护不再入库，等于白玩一局。
             snapshotRepo.clear()
         }
+        // 已结算 ≠ 挂起：清掉挂起标记，避免 ON_STOP 误以为要保住快照。
+        roundSuspendedToMenu = false
     }
 
     /**
@@ -457,6 +481,8 @@ class GameViewModel(
             //
             // 得分 > 0 的路径由 recordCurrentRound 入库后一并清，不必重复。
             viewModelScope.launch { snapshotRepo.clear() }
+            // 这是真退出，不是挂起。
+            roundSuspendedToMenu = false
             onRecorded()
             return
         }
@@ -478,25 +504,97 @@ class GameViewModel(
     }
 
     /**
+     * 挂起当前对局并回首页 —— 暂停面板的「退出」。
+     *
+     * ## 与 [onQuit] 的区别：这一局还没结束
+     *
+     * | | [onQuit] | 本方法 |
+     * |---|---|---|
+     * | 语义 | 这局**结束了** | 这局**先放着** |
+     * | 成绩入库 | 是 | 否 |
+     * | 最高分结算 | 是 | 否 |
+     * | 快照 | 清掉 | **保留** |
+     * | 能否恢复 | 不能 | 能（菜单「继续上局」）|
+     *
+     * 玩家从暂停面板退出，意图是「我先干点别的，这局待会儿接着玩」。
+     * 若此时结算入库，会产生两个坏后果：
+     *
+     * 1. 一局被玩了两半，却在历史里留下两条记录（先记 300 分，恢复后
+     *    玩完再记 800 分）
+     * 2. 更糟：结算会清快照（见 [recordCurrentRound]），玩家回到菜单
+     *    发现没有「继续上局」—— 那一局凭空消失
+     *
+     * 所以这里**只写快照、不做结算**。成绩留到这局真正结束时再算。
+     *
+     * ## 为什么同步写
+     *
+     * 与 [onStopWithSnapshot] 同理，但原因不同：这里进程不会死，是为了
+     * **顺序保证** —— 回调触发后 UI 立刻切到菜单，菜单要马上查
+     * [hasRestorableSnapshot] 来决定是否显示「继续上局」。异步写会让这两
+     * 件事赛跑，输了就是「刚退出却没有继续按钮」。
+     *
+     * @param onSuspended 快照落盘后的回调（在主线程），UI 在此切回菜单。
+     */
+    fun onSuspendToMenu(onSuspended: () -> Unit = {}) {
+        timerJob?.cancel()
+        swapJob?.cancel()
+
+        val s = _state.value
+        val snapshot = GameSnapshot(
+            board = s.board,
+            score = s.score,
+            combo = s.combo,
+            remainingSeconds = s.remainingSeconds,
+        )
+
+        // 已结算的局不该再留快照（例如结算弹窗上切后台又回来）。
+        // 这里的判据与 onStopWithSnapshot 一致，避免两处行为分叉。
+        if (!currentRoundRecorded && snapshot.isRestorable) {
+            snapshotRepo.saveBlocking(snapshot)
+            // 告诉 onStopWithSnapshot：这个 IDLE 是「挂起」，别清快照。
+            roundSuspendedToMenu = true
+        } else {
+            snapshotRepo.clearBlocking()
+            roundSuspendedToMenu = false
+        }
+
+        // 置 IDLE：离开游戏屏后 phase 不该停在 PAUSED，否则下次进游戏屏
+        // 会先闪一下暂停面板。
+        _state.update { it.copy(phase = GamePhase.IDLE) }
+        onSuspended()
+    }
+
+    /**
      * 系统级恢复（Activity 回到前台）。
      *
-     * ## 为什么不能直接用 [onResume]
+     * ## 刻意什么都不做
      *
-     * [onResume] 的语义是「解除暂停」：它把 PAUSED 翻回 PLAYING 并重启
-     * 倒计时。批次 C 之前这两件事是同一件 —— 只有游戏屏，回到前台就该继续玩。
+     * 从后台切回来**不自动继续对局**，停在 [GamePhase.PAUSED] 等玩家手动
+     * 点「继续」。
      *
-     * 引入菜单后不再等同：玩家在**菜单或历史记录屏**时切后台再回来，
-     * ON_RESUME 照样触发。此时若 phase 恰好是 PAUSED（上一局暂停后
-     * 从对话框退到了菜单），[onResume] 会让倒计时在玩家看不见棋盘的情况下
-     * 跑起来。
+     * 理由：玩家切回来的注意力不在棋盘上 —— 可能刚回完消息、刚看完通知。
+     * 此时倒计时立刻跑起来，等于凭空吃掉几秒。而这是个 60 秒计时的消除
+     * 游戏，几秒是实打实的损失。
      *
-     * 所以系统恢复要多一个条件：**当前必须真的在游戏屏**。
-     * 该信息只有 UI 知道，故由调用方传入。
+     * 与「暂停」的语义也更一致：切后台已经进入暂停态（`ON_PAUSE` →
+     * [onPause]），那么解除暂停就该由玩家显式发起，而不是系统替他决定。
+     *
+     * ## 为什么保留这个方法而不删掉调用
+     *
+     * 保留 `ON_RESUME` 这个接线点，是为了让「回到前台什么都不做」成为一个
+     * **显式的决定**而非遗漏。若哪天要加「回到前台播个恢复提示音」之类的
+     * 逻辑，落点在这里。
+     *
+     * 也保留 [isOnGameScreen] 参数：它记录了一个真实约束 —— 玩家可能在
+     * 菜单/历史屏切后台，那些屏幕上恢复对局是无意义的。将来若改回自动
+     * 继续，这个判断仍然必须存在。
      *
      * @param isOnGameScreen 当前是否停留在游戏屏
      */
+    @Suppress("UNUSED_PARAMETER")
     fun onSystemResume(isOnGameScreen: Boolean) {
-        if (isOnGameScreen) onResume()
+        // 有意为之的空实现 —— 见上方文档。
+        // 恢复动作由玩家在暂停面板上手动触发（PauseDialog 的「继续」）。
     }
 
     /**
@@ -573,9 +671,14 @@ class GameViewModel(
 
         if (worthSaving) {
             snapshotRepo.saveBlocking(snapshot)
-        } else {
+        } else if (!roundSuspendedToMenu) {
             // 主动清掉旧快照：否则「上次中断留下的快照」会在这次
             // 已结算/未开局的情况下残留，下次启动恢复出过期现场。
+            //
+            // ⚠️ 但「挂起回菜单」是例外：那条路径刚刚**故意**存了快照，
+            // phase 也被置成 IDLE。若不排除，玩家点「保留并返回首页」后
+            // 在菜单划掉应用，这里会把刚保留的对局清掉 —— 正是要保住的
+            // 那一局没了。
             snapshotRepo.clearBlocking()
         }
     }
@@ -616,6 +719,8 @@ class GameViewModel(
         roundGeneration++
         // 恢复的是一局**尚未结算**的对局 —— 它当初就是被中断的。
         currentRoundRecorded = false
+        // 快照已被消费，「挂起」状态随之结束。
+        roundSuspendedToMenu = false
 
         _state.update {
             GameState(
