@@ -156,11 +156,14 @@ object CascadeEngine {
         // Fast-path: no initial matches → no chain at all. Return
         // identity board (no Gravity call — explicit & cheap).
         if (initialMatches.isEmpty()) {
-            return CascadeResult(cascades = emptyList(), finalBoard = board)
+            return CascadeResult(cascades = emptyList(), finalBoard = board, rounds = emptyList())
         }
 
         val cascades: MutableList<List<Match>> = mutableListOf()
         cascades.add(initialMatches)
+
+        // 每轮的重力/补充快照，供动画层复用（见循环内的说明）。
+        val rounds: MutableList<CascadeRound> = mutableListOf()
 
         var currentBoard: Board = board
         var currentMatches: List<Match> = initialMatches
@@ -180,7 +183,19 @@ object CascadeEngine {
             // 补充必须发生在 detect 之前：新落下的 tile 有资格构成新的
             // 连线，这正是 cascade 连锁的来源。
             currentBoard = GravityEngine.applyGravity(currentBoard, currentMatches)
+            val fallenSnapshot = currentBoard
             currentBoard = BoardEngine.spawnRefill(currentBoard, rng)
+
+            // FIX_PLAN D8-bug2：把本轮「落下后」「补充后」两张快照留档。
+            //
+            // 动画层过去自己再调一次 applyGravity + spawnRefill 来生成帧，
+            // 那是**第二次**随机采样 —— 掉下来的寿司与最终落定的不是同一批
+            // （id 和 type 都不同，因为 TileIdGenerator 全局自增、
+            // SushiType.random 又各摇一次）。
+            //
+            // 现在补充结果由本引擎单点产出、动画层直接消费，从结构上排除
+            // 不一致的可能，而不是试图让两次随机「碰巧相同」。
+            rounds.add(CascadeRound(fallen = fallenSnapshot, refilled = currentBoard))
 
             // Step B: detect. If no new matches, the chain is over.
             currentMatches = MatchEngine.detectMatches(currentBoard)
@@ -195,7 +210,11 @@ object CascadeEngine {
             // matches and re-detect.
         }
 
-        return CascadeResult(cascades = cascades.toList(), finalBoard = currentBoard)
+        return CascadeResult(
+            cascades = cascades.toList(),
+            finalBoard = currentBoard,
+            rounds = rounds.toList(),
+        )
     }
 }
 
@@ -227,4 +246,37 @@ object CascadeEngine {
 data class CascadeResult(
     val cascades: List<List<Match>>,
     val finalBoard: Board,
+    /**
+     * 每一轮的重力 / 补充快照，与 [cascades] **一一对应且等长**。
+     *
+     * 存在的唯一目的是让动画层复用本引擎算出的补充结果，而不是自己再摇
+     * 一次随机（那会让掉下来的寿司与落定的不是同一批）。详见 [CascadeRound]。
+     */
+    val rounds: List<CascadeRound>,
+)
+
+/**
+ * 一个 cascade round 的两张中间快照。
+ *
+ * ## 为什么必须由 [CascadeEngine] 产出而不是动画层自己算
+ *
+ * `BoardEngine.spawnRefill` 每次调用都会**重新随机**：`SushiType.random(rng)`
+ * 摇新类型，`TileIdGenerator.next()` 发新 id。所以「算两次」必然得到两批
+ * 不同的 tile。
+ *
+ * 早期实现里 `CascadeEngine` 算一次（用于 `finalBoard`），`CascadeAnimator`
+ * 又算一次（用于生成动画帧），于是玩家看到的是：**掉进格子的寿司和最后
+ * 停在那里的寿司不是同一个**。每次消除都会发生，不限于连锁。
+ *
+ * 修法不是「设法让两次随机一致」（同一个 rng 也要求调用次数与顺序完全
+ * 对齐，脆弱且难维护），而是**只算一次、把结果传下去** —— 单一数据源。
+ *
+ * @property fallen   本轮重力落下后、**尚未补充**的棋盘。顶部空洞正是
+ *                    SpawnIn 帧要填的格子。
+ * @property refilled 本轮补充完成的棋盘。飞进来的 tile 的真实 id 与 type
+ *                    取自这里，与 `finalBoard` 同源。
+ */
+data class CascadeRound(
+    val fallen: Board,
+    val refilled: Board,
 )

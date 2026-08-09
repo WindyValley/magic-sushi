@@ -154,12 +154,15 @@ class CascadeAnimatorTest {
     fun `返回的棋盘是最后一轮补充后的结果且已补满`() = runTest {
         val board = boardWithColumnMatch()
         val matches = MatchEngine.detectMatches(board)
+        // 与生产路径一致：补充结果由 CascadeEngine 单点算出后传入。
+        val cascadeResult = CascadeEngine.cascadeUntilStable(board, matches)
 
         val result = playCascadeAnimation(
             startBoard = board,
-            cascades = listOf(matches),
+            cascades = cascadeResult.cascades,
             phaseMs = phaseMs,
             gapMs = gapMs,
+            rounds = cascadeResult.rounds,
             onFrame = { _, _ -> },
         )
 
@@ -168,22 +171,32 @@ class CascadeAnimatorTest {
         assertTrue("棋盘应已变化（发生了消除）", result != board)
     }
 
+    /**
+     * D4 索引体系收口 + bug「动画寿司与落定不符」的回归防线。
+     *
+     * 契约：动画里飞进来的那一个，就是落定后站在那格的那一个。
+     *
+     * ⚠️ 关键在于 rounds 必须来自 `CascadeEngine` —— 早期实现允许动画层
+     * 在不传时自己调 `spawnRefill` 兜底，那会重新摇一次随机，产出与
+     * `finalBoard` 不同的另一批 tile。本用例额外断言与 `finalBoard`
+     * 一致，把那条路彻底堵死。
+     */
     @Test
     fun `SpawnIn 帧的 tile 身份与返回棋盘一致`() = runTest {
         val board = boardWithColumnMatch()
         val matches = MatchEngine.detectMatches(board)
+        val cascadeResult = CascadeEngine.cascadeUntilStable(board, matches)
 
         var lastFrame: AnimFrame? = null
         val result = playCascadeAnimation(
             startBoard = board,
-            cascades = listOf(matches),
+            cascades = cascadeResult.cascades,
             phaseMs = phaseMs,
             gapMs = gapMs,
+            rounds = cascadeResult.rounds,
             onFrame = { _, f -> lastFrame = f },
         )
 
-        // D4 索引体系收口的核心契约：动画里飞进来的那一个，
-        // 就是落定后站在那格的那一个。
         val spawnStates = lastFrame!!.filterValues {
             it.anim is AnimationEngine.TileAnim.SpawningIn
         }
@@ -192,6 +205,17 @@ class CascadeAnimatorTest {
             val real = result.grid[cell.row][cell.col]
             assertEquals("$cell 的 id 必须与返回棋盘一致", real!!.id, state.tileId)
             assertEquals("$cell 的 type 必须与返回棋盘一致", real.type, state.type)
+
+            // 与权威终态对齐 —— 这是玩家实际看到的那张棋盘。
+            val authoritative = cascadeResult.finalBoard.grid[cell.row][cell.col]
+            assertEquals(
+                "$cell 的 id 必须与 CascadeEngine 的 finalBoard 一致",
+                authoritative!!.id, state.tileId,
+            )
+            assertEquals(
+                "$cell 的 type 必须与 CascadeEngine 的 finalBoard 一致",
+                authoritative.type, state.type,
+            )
         }
     }
 }

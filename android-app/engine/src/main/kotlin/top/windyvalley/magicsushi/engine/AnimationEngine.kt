@@ -198,8 +198,18 @@ object AnimationEngine {
         // 编号空间，和 tile.id 抢同一个 Compose key 槽位。
         //
         // 现在由调用方把 `spawnRefill` 的结果传进来，spawn tile 直接读它的
-        // 真实 id 与 type。不传时退化为自己算一份（单测/独立调用路径）。
-        val refilled = refilledBoard ?: BoardEngine.spawnRefill(fallen)
+        // 真实 id 与 type。
+        //
+        // ⚠️ 这里曾经有个 `?: BoardEngine.spawnRefill(fallen)` 兜底，注释称
+        // 「不传时退化为自己算一份（单测/独立调用路径）」。那个兜底就是
+        // 「动画寿司与落定不符」的根源：spawnRefill 每次调用都重新摇 type、
+        // 重新发 id，兜底算出的必然是与 finalBoard 不同的另一批 tile，
+        // 而生产路径一旦漏传就会静默走进这个分支。
+        //
+        // 现在不再兜底：refilledBoard 为 null 时**不生成 spawn-in 帧**。
+        // 少播一段动画是可见且无害的退化，凭空造一批假 tile 则是会误导
+        // 玩家的错误渲染 —— 宁可少画，不可画错。
+        val refilled = refilledBoard
 
         // Track the "pre-fall row" for each tile so we can compute the offset.
         // Build a map: tileId → pre-fall row.
@@ -309,7 +319,10 @@ object AnimationEngine {
             // We detect this by tracking nullCountFromTop as the count of consecutive
             // nulls seen so far. When we encounter a non-null at row N, subsequent
             // nulls (row N+1, N+2, ...) are interior and get skipped.
+            // refilled 为 null 表示调用方没有提供补充结果 —— 不生成
+            // spawn-in（见上方关于「宁可少画，不可画错」的说明）。
             for (col in 0 until fallen.size) {
+                if (refilled == null) break
                 var nullCountFromTop = 0
                 for (row in 0 until fallen.size) {
                     val occupant = fallen.grid[row][col]

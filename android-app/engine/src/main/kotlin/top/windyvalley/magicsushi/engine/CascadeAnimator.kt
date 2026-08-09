@@ -56,6 +56,7 @@ suspend fun playCascadeAnimation(
     cascades: List<List<Match>>,
     phaseMs: Long,
     gapMs: Long,
+    rounds: List<CascadeRound> = emptyList(),
     shouldContinue: () -> Boolean = { true },
     awaitResume: suspend () -> Unit = {},
     onFrame: (board: Board?, frame: AnimFrame) -> Unit,
@@ -94,14 +95,19 @@ suspend fun playCascadeAnimation(
             waitPausable(gapMs)
         }
 
-        // 本轮的重力与补充各算一次，供帧生成与下一轮共用。
+        // 本轮的重力与补充结果**来自 CascadeEngine**，不在这里重算。
         //
-        // 这两份结果必须同源（FIX_PLAN P1-2 / D4）：
-        //   - fallen   决定 SpawnIn 帧里哪些格子是空的
-        //   - refilled 决定飞进来的 tile 的真实 id 与 type
-        // 若各算一次，动画显示的寿司和落定后的寿司会是两个不同的 tile。
-        val fallen = GravityEngine.applyGravity(currentBoard, round)
-        val refilled = BoardEngine.spawnRefill(fallen)
+        // ⚠️ 曾经这里自己调 applyGravity + spawnRefill。那看似「同源」
+        // （fallen 与 refilled 确实来自同一次计算），但与 CascadeEngine
+        // 算出的 finalBoard 是**两批不同的随机 tile** —— spawnRefill 每次
+        // 都重新摇 type、重新发 id。玩家看到的是掉下来的寿司和最终落定的
+        // 不是同一个，每次消除都发生。
+        //
+        // rounds 与 cascades 等长且一一对应；缺失时退化为「只播消除与下落、
+        // 不播 spawn-in」，而不是伪造一批新 tile 蒙混过去。
+        val snapshot = rounds.getOrNull(roundIdx)
+        val fallen = snapshot?.fallen ?: GravityEngine.applyGravity(currentBoard, round)
+        val refilled = snapshot?.refilled
 
         val frames = AnimationEngine.generateFrames(
             currentBoard,
@@ -126,7 +132,11 @@ suspend fun playCascadeAnimation(
 
         // 推进到下一轮起点。与 SpawnIn 帧同源，故「飞进来的 tile」
         // 与「下一轮站在那格的 tile」id 一致。
-        currentBoard = refilled
+        //
+        // refilled 缺失时退回 fallen：既然没有权威的补充结果，就不臆造
+        // 一批 tile 塞进下一轮。权威终态始终由调用方用
+        // CascadeResult.finalBoard 覆盖，所以这里的退化不影响最终棋盘。
+        currentBoard = refilled ?: fallen
     }
 
     return currentBoard

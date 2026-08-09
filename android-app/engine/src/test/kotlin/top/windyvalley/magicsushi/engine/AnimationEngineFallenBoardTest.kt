@@ -106,10 +106,15 @@ class AnimationEngineFallenBoardTest {
 
         // 误把补满的棋盘当 fallenBoard 传进去，SpawnIn 帧就没有新 tile 可飞。
         // 用 anim 类型判定 spawn（负数 id 约定已废除，不能再靠正负号）。
-        val framesCorrect =
-            AnimationEngine.generateFrames(board, matches, fallenBoard = fallen)
-        val framesWrong =
-            AnimationEngine.generateFrames(board, matches, fallenBoard = refilled)
+        //
+        // 两个分支都传同一个 refilledBoard，确保唯一变量是 fallenBoard
+        // ——这才是本用例要验的那一处差异。
+        val framesCorrect = AnimationEngine.generateFrames(
+            board, matches, fallenBoard = fallen, refilledBoard = refilled,
+        )
+        val framesWrong = AnimationEngine.generateFrames(
+            board, matches, fallenBoard = refilled, refilledBoard = refilled,
+        )
 
         val spawnCellsCorrect = framesCorrect[2]
             .filterValues { it.anim is AnimationEngine.TileAnim.SpawningIn }.keys

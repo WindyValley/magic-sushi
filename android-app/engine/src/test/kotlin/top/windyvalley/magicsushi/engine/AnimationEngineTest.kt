@@ -208,7 +208,15 @@ class AnimationEngineTest {
         val allCol0 = (0..6).map { board.grid[it][0]!! }
         val match = Match(tiles = allCol0, axis = MatchAxis.VERTICAL, length = 7)
 
-        val frames = AnimationEngine.generateFrames(board, listOf(match))
+        // refilledBoard 必须显式传入：生成 spawn-in 帧需要知道飞进来的
+        // tile 的真实身份。此前 AnimationEngine 会在缺省时自己调
+        // spawnRefill 兜底，那是「动画寿司与落定不符」的根源，已删除。
+        // 本用例验的是 offsetY 的几何正确性，身份来源另有专门用例覆盖。
+        val fallen = GravityEngine.applyGravity(board, listOf(match))
+        val refilled = BoardEngine.spawnRefill(fallen)
+        val frames = AnimationEngine.generateFrames(
+            board, listOf(match), fallenBoard = fallen, refilledBoard = refilled,
+        )
         val f2 = frames[2]
 
         var foundSpawn = false
@@ -331,7 +339,13 @@ class AnimationEngineTest {
         val elimTile = board.grid[0][0]!!
         val match = Match(tiles = listOf(elimTile), axis = MatchAxis.VERTICAL, length = 1)
 
-        val frames = AnimationEngine.generateFrames(board, listOf(match))
+        // 显式传 refilledBoard（兜底已删除，理由同上）。本用例验的是
+        // 「哪些格子算真正的顶部空洞」这一几何判定。
+        val fallen = GravityEngine.applyGravity(board, listOf(match))
+        val refilled = BoardEngine.spawnRefill(fallen)
+        val frames = AnimationEngine.generateFrames(
+            board, listOf(match), fallenBoard = fallen, refilledBoard = refilled,
+        )
         val f2 = frames[2]
 
         // Frame 2: exactly ONE SpawningIn tile in column 0 (row 0), NOT at rows 1-6.

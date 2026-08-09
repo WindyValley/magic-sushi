@@ -750,6 +750,10 @@ class GameViewModel(
                     cascades = cascadeResult.cascades,
                     phaseMs = ANIM_PHASE_MS,
                     gapMs = ANIM_GAP_MS,
+                    // 每轮的补充结果由 CascadeEngine 单点算出，动画层直接复用。
+                    // 不传会导致动画层自己再摇一次随机，飞进来的寿司与最终
+                    // 落定的不是同一批（每次消除都可见）。
+                    rounds = cascadeResult.rounds,
                     // 守卫只负责**永久性**中止：本局已被换掉（代际不符）或
                     // 已经结束/回到 IDLE。
                     //
