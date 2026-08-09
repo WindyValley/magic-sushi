@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import top.windyvalley.magicsushi.engine.HighScoreRules
 
 /**
  * 屏幕底部分数条。
@@ -38,7 +39,21 @@ fun ScoreOverlay(
     var previousHigh by remember { mutableStateOf(highScore) }
     var highJustChanged by remember { mutableStateOf(false) }
     LaunchedEffect(highScore) {
-        if (highScore > previousHigh) {
+        // FIX_PLAN D8：判据不能只看「最高分变大了」。
+        //
+        // 设置迁到 DataStore 后最高分是异步装载的，冷启动时这里会先收到
+        // 占位值 0、随后被真实值（比如 500）替换。那次 0 → 500 的跳变同样
+        // 满足「变大了」，于是玩家一进游戏就会看到一次莫名的破纪录庆祝。
+        //
+        // 真正的区分点是**本局是否已经得过分**：异步装载发生在开局前，
+        // 那时 currentScore 必然为 0。规则连同两个方向的用例都在
+        // engine 的 HighScoreRulesTest 里锁死。
+        if (HighScoreRules.shouldCelebrateHighScore(
+                previousHigh = previousHigh,
+                newHigh = highScore,
+                currentScore = currentScore,
+            )
+        ) {
             highJustChanged = true
             kotlinx.coroutines.delay(1000)
             highJustChanged = false

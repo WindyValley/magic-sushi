@@ -78,6 +78,14 @@ dependencies {
     // DataStore 的读写都是 suspend/Flow，天然在 IO 线程。
     implementation("androidx.datastore:datastore-preferences:1.0.0")
 
+    // 系统启动窗口延长（FIX_PLAN D8）。
+    //
+    // 冷启动要同步预热一次设置（最高分/静音），这段 IO 期间主线程被占住，
+    // 自绘的 Compose 启动页同样画不出来 —— composition 也在主线程。
+    // 只有系统启动窗口能盖住：它由 WindowManager 在进程起来前就绘制完成。
+    // setKeepOnScreenCondition 把它留到数据就绪为止。
+    implementation("androidx.core:core-splashscreen:1.0.1")
+
     // Jetpack Compose (BOM)
     val composeBom = platform("androidx.compose:compose-bom:2024.02.00")
     implementation(composeBom)

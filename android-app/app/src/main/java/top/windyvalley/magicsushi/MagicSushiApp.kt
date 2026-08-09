@@ -1,6 +1,9 @@
 package top.windyvalley.magicsushi
 
 import android.app.Application
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Dispatchers
 import top.windyvalley.magicsushi.audio.SoundPlayer
 import top.windyvalley.magicsushi.data.HistoryRepository
 import top.windyvalley.magicsushi.data.PrefsRepository
@@ -37,17 +40,50 @@ import top.windyvalley.magicsushi.data.PrefsRepository
  */
 class MagicSushiApp : Application() {
 
+    /**
+     * 应用级协程作用域，供仓库层的异步写入使用。
+     *
+     * 用 [SupervisorJob]：某次落盘失败不该连带取消其他写入。
+     * 生命周期等于进程，故刻意不做 cancel —— 没有比进程更长的宿主可以
+     * 承接它，而设置项的写入必须能在 Activity 销毁后完成（例如
+     * 退出前保存最高分）。
+     */
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     /** 应用级持久化仓库。设置类状态（静音、最高分）的唯一数据源。 */
-    val prefsRepo: PrefsRepository by lazy { PrefsRepository(this) }
+    val prefsRepo: PrefsRepository by lazy { PrefsRepository(this, appScope) }
 
     /**
      * 历史记录仓库（DataStore）。
      *
-     * 与 [prefsRepo] 分开：那个是 SharedPreferences 存两个标量，
-     * 这个是 DataStore 存最多 50 条记录（FIX_PLAN D8）。
+     * 与 [prefsRepo] 分开是按**数据性质**划分，不再是存储机制的差异：
+     * 这个存最多 50 条对局记录，那个存设置类标量。两者现在都是 DataStore
+     * （FIX_PLAN D8 完成后不再有 SharedPreferences）。
      */
     val historyRepo: HistoryRepository by lazy { HistoryRepository(this) }
 
     /** 应用级音效播放器。静音状态从 [prefsRepo] 读取，自身不持有该状态。 */
     val soundPlayer: SoundPlayer by lazy { SoundPlayer(this) }
+
+    /**
+     * 预热设置缓存（FIX_PLAN D8）。
+     *
+     * ## 为什么必须在这里，而且必须同步
+     *
+     * `PrefsRepository` 对外暴露同步读接口（`isMuted()` / `getHighScore()`），
+     * 底层却是异步的 DataStore。两者之间靠内存缓存衔接，而缓存必须在
+     * **首帧渲染之前**装载完真实值，否则 UI 会先画出占位的最高分 0
+     * 再跳到真实值。
+     *
+     * `Application.onCreate` 是进程里最早能跑业务代码的时机，早于任何
+     * Activity 和 Composable。这段阻塞被系统启动窗口完整遮住
+     * （见 `MainActivity` 的 `setKeepOnScreenCondition`），玩家看不到白屏。
+     *
+     * 首次运行时这里还会触发 `SharedPreferencesMigration`，把老版本
+     * `magic_sushi_prefs.xml` 里的最高分和静音状态搬进 DataStore。
+     */
+    override fun onCreate() {
+        super.onCreate()
+        prefsRepo.warmUp()
+    }
 }

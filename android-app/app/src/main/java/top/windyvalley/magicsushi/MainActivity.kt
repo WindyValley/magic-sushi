@@ -6,6 +6,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -59,6 +60,20 @@ class MainActivity : ComponentActivity() {
     private var isOnGameScreen: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // FIX_PLAN D8：必须在 super.onCreate() / setContent() 之前安装，
+        // 否则启动窗口已经交接完毕，keepOnScreenCondition 拦不住。
+        //
+        // 预热（MagicSushiApp.onCreate → prefsRepo.warmUp）通常在此之前就
+        // 已完成，此时条件立刻为 false、启动窗口不会额外停留。这里的守卫
+        // 是为极端情况兜底：低端机首次安装要跑 SharedPreferences 迁移，
+        // 那次 IO 可能明显更慢。
+        //
+        // 为什么不自绘一个 Compose 启动页：预热是主线程同步 IO，期间
+        // composition 同样被冻住，自绘的页面一帧都画不出来，玩家只会看到
+        // 白屏。系统启动窗口由 WindowManager 在进程起来前绘制，不受影响。
+        val splash = installSplashScreen()
+        splash.setKeepOnScreenCondition { !app.prefsRepo.isReady }
+
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 

@@ -3,4 +3,31 @@
     <style name="Theme.MagicSushi" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:statusBarColor" tools:targetApi="l">@color/sushi_primary</item>
     </style>
+
+    <!--
+        启动窗口主题（FIX_PLAN D8）。
+
+        ## 为什么需要它
+
+        冷启动时要同步预热一次设置（最高分/静音）。那段 IO 占住主线程，
+        期间 Compose 画不出任何东西 —— composition 同样跑在主线程上。
+        不处理的话玩家看到的是一段白屏。
+
+        系统启动窗口不受这个限制：它由 WindowManager 在进程真正起来之前
+        就绘制好，所以能盖住整段冷启动。MainActivity 里用
+        setKeepOnScreenCondition 把它留到数据就绪为止。
+
+        ## 为什么 parent 是 Theme.SplashScreen 而不是继承 Theme.MagicSushi
+
+        core-splashscreen 要求启动主题继承自它的基类，windowSplashScreen*
+        这几个属性才会被识别。postSplashScreenTheme 负责在启动窗口消失后
+        切回应用真正的主题 —— 这是官方指定的交接方式，不能靠手工
+        setTheme() 代替（时序不对会闪一帧）。
+    -->
+    <style name="Theme.MagicSushi.Splash" parent="Theme.SplashScreen">
+        <!-- 米色背景，与游戏内主色调一致，避免启动窗口到菜单屏之间的色差跳变 -->
+        <item name="windowSplashScreenBackground">@color/sushi_bg_light</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="postSplashScreenTheme">@style/Theme.MagicSushi</item>
+    </style>
 </resources>

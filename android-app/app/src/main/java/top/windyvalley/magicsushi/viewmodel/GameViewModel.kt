@@ -23,6 +23,7 @@ import top.windyvalley.magicsushi.engine.CascadeEngine
 import top.windyvalley.magicsushi.engine.GameEvent
 import top.windyvalley.magicsushi.engine.GameRecord
 import top.windyvalley.magicsushi.engine.GravityEngine
+import top.windyvalley.magicsushi.engine.HighScoreRules
 import top.windyvalley.magicsushi.engine.GamePhase
 import top.windyvalley.magicsushi.engine.GameState
 import top.windyvalley.magicsushi.engine.MatchEngine
@@ -860,7 +861,9 @@ class GameViewModel(
     private fun onGameOver() {
         val finalScore = _state.value.score
         val oldHigh = prefsRepo.getHighScore()
-        val isNew = finalScore > oldHigh
+        // FIX_PLAN D8：与 ScoreOverlay 的庆祝判据共用 engine 里的同一套规则，
+        // 避免「破纪录」这个概念在 UI 和 VM 各写一份后悄悄分叉。
+        val isNew = HighScoreRules.isNewRecord(finalScore, oldHigh)
         if (isNew) prefsRepo.saveHighScore(finalScore)
 
         _state.update {
