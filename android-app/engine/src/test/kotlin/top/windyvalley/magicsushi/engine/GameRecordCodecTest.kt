@@ -68,11 +68,21 @@ class GameRecordCodecTest {
         assertTrue(GameRecordCodec.decode("   \n  \n ").isEmpty())
     }
 
+    /**
+     * 字段数**不足**的行被跳过。
+     *
+     * ⚠️ 这条原本还断言「多一个字段的行也被跳过」（`300,3000,0,extra`
+     * 期望被丢弃）。那个断言固化的正是 FIX_PLAN D8 要修的缺陷 ——
+     * 它使得给 GameRecord 加第 4 个字段必然清空所有老数据。
+     *
+     * 新契约是 append-only：多出的尾部字段忽略，整行照常读出。
+     * 因此把「多字段」那行移到 `多出的尾部字段被忽略而非丢弃整行`，
+     * 这里只保留「少字段」的用例。
+     */
     @Test
-    fun `字段数不对的行被跳过`() {
+    fun `字段数不足的行被跳过`() {
         val raw = "100,1000,1\n" +
-            "200,2000\n" +           // 少一个字段
-            "300,3000,0,extra\n" +   // 多一个字段
+            "200,2000\n" +           // 少一个字段 → 损坏，丢弃
             "400,4000,1"
         val decoded = GameRecordCodec.decode(raw)
         assertEquals("只应保留两条合法记录", 2, decoded.size)
@@ -135,5 +145,61 @@ class GameRecordCodecTest {
         assertEquals(2, decoded.size)
         assertEquals(100, decoded[0].score)
         assertTrue(decoded[0].isNewRecord)
+    }
+
+    // ========================================================================
+    // 跨版本兼容（字段演进契约）
+    //
+    // 上面所有容错用例都建立在「一行恰好 3 个字段」的前提上，所以它们
+    // 拦不住格式演进事故：早期实现写的是 `parts.size != 3`，一旦加第 4 个
+    // 字段，全部老数据都会被判非法并静默清空。下面两条锁死双向兼容。
+    // ========================================================================
+
+    /**
+     * **老版本读新数据**（向后兼容）。
+     *
+     * 场景：玩家在新版本里玩过，历史里每行有 4 个字段；随后降级回老版本
+     * （或老版本的代码路径读到了新数据）。多出来的尾部字段必须被忽略，
+     * 而不是导致整行被丢弃。
+     */
+    @Test
+    fun `多出的尾部字段被忽略而非丢弃整行`() {
+        // 第 4 段 15 / 8 是未来版本追加的字段（比如 maxCombo），本版本不认识
+        val raw = "1200,1717000000000,1,15\n800,1716900000000,0,8"
+        val decoded = GameRecordCodec.decode(raw)
+
+        assertEquals("两行都应被读出", 2, decoded.size)
+        assertEquals(listOf(1200, 800), decoded.map { it.score })
+        assertEquals(1_717_000_000_000L, decoded[0].timestampMillis)
+        assertTrue("已知字段仍要正确解析", decoded[0].isNewRecord)
+    }
+
+    /**
+     * **新版本读老数据**（向前兼容）。
+     *
+     * 这是升级路径，也是原实现真正会咬人的地方：老玩家存的每一行都只有
+     * 3 段，若解析要求「恰好等于当前字段数」，升级后历史会一条不剩。
+     */
+    @Test
+    fun `三字段老数据在新版本仍能完整读出`() {
+        val raw = "1200,1717000000000,true\n800,1716900000000,false"
+        val decoded = GameRecordCodec.decode(raw)
+
+        assertEquals("老数据不能因为字段少而丢失", 2, decoded.size)
+        assertEquals(listOf(1200, 800), decoded.map { it.score })
+        assertTrue(decoded[0].isNewRecord)
+        assertTrue(!decoded[1].isNewRecord)
+    }
+
+    /**
+     * 兼容不能滑向「什么都收」：字段数**少于** v1 的三段仍是损坏数据，
+     * 必须丢弃。这条守住 MIN_FIELDS 的下界，防止有人把判断放宽成
+     * 「能解析出几个算几个」。
+     */
+    @Test
+    fun `少于三字段仍视为损坏`() {
+        val decoded = GameRecordCodec.decode("1200,1717000000000\n800\n500,1716900000000,1")
+        assertEquals("只有完整的那行该被保留", 1, decoded.size)
+        assertEquals(500, decoded[0].score)
     }
 }

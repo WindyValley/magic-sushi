@@ -26,11 +26,37 @@ package top.windyvalley.magicsushi.engine
  *
  * 存储可能被外部改坏、可能是旧版本格式、可能被截断。任何一行解析失败
  * 就跳过那一行，其余照常读出。历史记录不是关键数据，为它崩溃是本末倒置。
+ *
+ * ## 字段演进契约（**加字段前必读**）
+ *
+ * 早期实现用 `parts.size != 3` 判定合法行。那意味着一旦给 [GameRecord]
+ * 加第 4 个字段，新版本会把**所有老数据**（每行只有 3 段）判成非法并
+ * 静默丢弃 —— 玩家升级后历史记录凭空清空，没有崩溃、没有日志、查不出来。
+ *
+ * 现在的规则是 **append-only + 缺失即默认值**：
+ *
+ * 1. **新字段只能追加在行尾**，不能插在中间，也不能改已有字段的顺序或含义
+ * 2. 解析只要求字段数 **≥ [MIN_FIELDS]**，多出来的字段忽略
+ *    （老版本读新数据 → 不认识的尾部字段直接跳过，向后兼容）
+ * 3. 读取新字段时用 [fieldOrNull] 取值，取不到就用默认值
+ *    （新版本读老数据 → 缺失字段回落默认值，向前兼容）
+ *
+ * 这样两个方向都不会丢数据。演进时请同步在
+ * `GameRecordCodecTest` 里加一条跨版本用例（已有两条可参照）。
  */
 object GameRecordCodec {
 
     private const val FIELD_SEPARATOR = ","
     private const val RECORD_SEPARATOR = "\n"
+
+    /**
+     * 一行至少要有的字段数 —— 即 v1 格式的三个字段。
+     *
+     * ⚠️ 这个值**永远不要往上调**。它代表「最老的、仍需被读出的格式」，
+     * 调大就等于宣布放弃比它更老的数据。加字段时只需让新字段可缺失，
+     * 不需要改这里。
+     */
+    private const val MIN_FIELDS = 3
 
     /**
      * 序列化为单个字符串。空列表返回空串。
@@ -59,7 +85,9 @@ object GameRecordCodec {
         if (trimmed.isEmpty()) return null
 
         val parts = trimmed.split(FIELD_SEPARATOR)
-        if (parts.size != 3) return null
+        // ≥ 而非 == ：多出的尾部字段是「更新版本写的、本版本还不认识的」，
+        // 忽略即可，不能因此丢掉整行（见类注释的字段演进契约）。
+        if (parts.size < MIN_FIELDS) return null
 
         val score = parts[0].trim().toIntOrNull() ?: return null
         val timestamp = parts[1].trim().toLongOrNull() ?: return null
@@ -78,4 +106,20 @@ object GameRecordCodec {
             isNewRecord = isNewRecord,
         )
     }
+
+    /**
+     * 按下标取字段，越界或空白返回 null。
+     *
+     * 加新字段时这样用（以第 4 个字段 maxCombo 为例）：
+     *
+     * ```kotlin
+     * val maxCombo = fieldOrNull(parts, 3)?.toIntOrNull() ?: 0
+     * ```
+     *
+     * 关键在于**缺失不算失败**：老数据没有这一段，回落默认值 0，
+     * 而不是把整行判为非法。
+     */
+    @Suppress("unused") // 供将来加字段时使用，先把正确姿势固定下来
+    private fun fieldOrNull(parts: List<String>, index: Int): String? =
+        parts.getOrNull(index)?.trim()?.takeIf { it.isNotEmpty() }
 }
