@@ -252,7 +252,7 @@
 
 ### AC-4 工程
 
-- [ ] `app-debug.apk` 能直接安装到 Android 8.0+ 设备（待真机确认）
+- [x] APK 能直接安装到 Android 8.0+ 设备（release 签名包，真机确认 2026-08-11）
 - [x] 包名：`top.windyvalley.magicsushi`（aapt2 dump badging 确认）
 - [x] git tag `v1.0.0` 已打，且与 `versionName` 一致（源码 / APK / 本文档三处一致）
 - [x] `05-release-notes.md` 写明本版本变更
