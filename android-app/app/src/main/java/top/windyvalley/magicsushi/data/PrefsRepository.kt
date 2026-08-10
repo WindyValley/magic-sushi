@@ -293,6 +293,27 @@ class PrefsRepository(
     }
 
     /**
+     * 重置最高分为 0。
+     *
+     * ## 为什么不能复用 [saveHighScore]
+     *
+     * 那个方法有「只升不降」守卫（[HighScoreRules.isNewRecord]），
+     * `saveHighScore(0)` 会被守卫直接挡掉、静默无效。重置是一个**语义上
+     * 不同的动作** —— 玩家显式要求清空，而非用新成绩去刷纪录，所以它需要
+     * 独立的入口而不是给 saveHighScore 加个 force 参数（那会让守卫变成
+     * 可选的，早晚被误用）。
+     *
+     * ## 为什么是 suspend
+     *
+     * 与 [saveHighScore]（同步返回、异步落盘）刻意不同：设置页面清空数据后
+     * 要给玩家明确反馈，UI 需要能等它真的落盘。而 saveHighScore 的调用点
+     * 在结算路径上，不能被挂起。
+     */
+    suspend fun resetHighScore() {
+        highScore.set(0)
+    }
+
+    /**
      * 挂起直到此前发起的写入都已落盘。
      *
      * 供「退出前必须确保成绩保存」这类场景使用（`GameViewModel.onQuit`）。

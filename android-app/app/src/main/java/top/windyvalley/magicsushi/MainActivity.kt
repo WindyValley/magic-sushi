@@ -12,6 +12,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -25,6 +26,7 @@ import top.windyvalley.magicsushi.ui.navigation.AppScreenSaver
 import top.windyvalley.magicsushi.ui.screen.GameScreen
 import top.windyvalley.magicsushi.ui.screen.HistoryScreen
 import top.windyvalley.magicsushi.ui.screen.MainMenuScreen
+import top.windyvalley.magicsushi.ui.screen.SettingsScreen
 import top.windyvalley.magicsushi.ui.theme.MagicSushiTheme
 import top.windyvalley.magicsushi.viewmodel.GameViewModel
 import top.windyvalley.magicsushi.viewmodel.GameViewModelFactory
@@ -218,6 +220,7 @@ private fun AppRoot(
                     screen = AppScreen.Game
                 },
                 onHistory = { screen = AppScreen.History },
+                onSettings = { screen = AppScreen.Settings },
                 onExit = onExitApp,
                 hasSavedRound = hasSavedRound,
                 onContinueGame = {
@@ -279,6 +282,32 @@ private fun AppRoot(
 
             HistoryScreen(
                 records = historyRecords,
+                onBack = { screen = AppScreen.Menu },
+            )
+        }
+
+        AppScreen.Settings -> {
+            BackHandler { screen = AppScreen.Menu }
+
+            // isMuted / highScore 都从 GameState 读 —— 它们是
+            // PrefsRepository 的投影（见 GameViewModel 的 init），所以设置页
+            // 改完之后这里会自动跟上，不需要手工刷新。
+            val gameState by viewModel.state.collectAsState()
+            // 历史条数只用来在「清空历史记录」旁边显示 N 条 + 决定按钮是否
+            // 可点，所以取当前快照即可。
+            val records by historyRecords.collectAsState(initial = emptyList())
+
+            SettingsScreen(
+                isMuted = gameState.isMuted,
+                highScore = gameState.highScore,
+                historyCount = records.size,
+                versionName = BuildConfig.VERSION_NAME,
+                onToggleMute = { viewModel.toggleMute() },
+                onClearHighScore = { viewModel.clearHighScore() },
+                // 清空历史会连快照一起清（见 VM 的说明），所以本地那份
+                // 「菜单是否显示继续上局」的缓存也要失效 —— 否则回到菜单
+                // 仍会看到「继续上局」，点进去却恢复不出任何东西。
+                onClearHistory = { viewModel.clearHistory { hasSavedRound = false } },
                 onBack = { screen = AppScreen.Menu },
             )
         }

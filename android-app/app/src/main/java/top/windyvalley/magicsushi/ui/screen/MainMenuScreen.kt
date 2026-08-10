@@ -53,6 +53,7 @@ import top.windyvalley.magicsushi.ui.theme.SushiBgDark
  *
  * @param onStartGame 点【开始游戏】。调用方负责导航到 Game 屏并开新局。
  * @param onHistory   点【历史记录】。
+ * @param onSettings  点【设置】。
  * @param onExit      点【退出游戏】。真正结束进程（用户明确要求），
  *                    由调用方（Activity）执行 `finishAffinity()` + `exitProcess`。
  */
@@ -63,6 +64,7 @@ fun MainMenuScreen(
     onExit: () -> Unit,
     hasSavedRound: Boolean = false,
     onContinueGame: () -> Unit = {},
+    onSettings: () -> Unit = {},
 ) {
     Box(
         modifier = Modifier
@@ -192,6 +194,26 @@ fun MainMenuScreen(
             ) {
                 Text(
                     text = "历史记录",
+                    fontSize = 17.sp,
+                    modifier = Modifier.padding(vertical = 8.dp),
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // ---- 次操作：设置 ----
+            OutlinedButton(
+                onClick = onSettings,
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = Color(0xFFFFE8C5),
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 320.dp),
+            ) {
+                Text(
+                    text = "设置",
                     fontSize = 17.sp,
                     modifier = Modifier.padding(vertical = 8.dp),
                 )

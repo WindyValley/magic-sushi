@@ -54,6 +54,18 @@ sealed interface AppScreen {
         override val key: String = "history"
     }
 
+    /**
+     * 设置页：音效开关、清空数据、关于。
+     *
+     * ⚠️ 单层页面，**没有子页**。这一点关系到导航方案的选择：本文件顶部
+     * 列出的演进条件之一是「设置页的多级子页（需要返回栈）」，若将来这里
+     * 要长出二级页面，就该换 navigation-compose 而不是在 when 里再套一层
+     * 屏幕状态。
+     */
+    data object Settings : AppScreen {
+        override val key: String = "settings"
+    }
+
     companion object {
         /**
          * 由 [key] 还原屏幕。无法识别时退回 [Menu]。
@@ -64,6 +76,7 @@ sealed interface AppScreen {
         fun fromKey(key: String): AppScreen = when (key) {
             Game.key -> Game
             History.key -> History
+            Settings.key -> Settings
             else -> Menu
         }
     }

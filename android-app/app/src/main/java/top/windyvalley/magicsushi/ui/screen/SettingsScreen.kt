@@ -1,0 +1,372 @@
+package top.windyvalley.magicsushi.ui.screen
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogProperties
+import top.windyvalley.magicsushi.ui.theme.SushiBgDark
+
+/**
+ * 设置页（单层，无子页）。
+ *
+ * 三个分区：
+ *  - **音效**    —— 静音开关
+ *  - **数据**    —— 清空最高分 / 清空历史记录（各带二次确认）
+ *  - **关于**    —— 版本号
+ *
+ * ## 为什么这个页面值得单独存在
+ *
+ * `GameViewModel.toggleMute()` 从批次 A 起就实现完整、接线正确（
+ * `SoundPlayer` 读 `PrefsRepository` 的 mutedProvider，`GameState.isMuted`
+ * 由 mutedFlow 投影），但**从来没有任何 UI 调用它** —— 一个零入口的功能。
+ * 玩家无法关掉音效，而代码看起来功能齐备。
+ *
+ * ## 清空数据为什么要二次确认
+ *
+ * 两项都是**不可撤销**的删除。惯例与退出对局一致（见 [ExitConfirmDialog]）：
+ * 破坏性操作一律先问一次，且确认框的默认结果（返回键 / 点外部）是取消。
+ *
+ * 刻意**不做**「清空所有数据」这种一键项：它把两个不同后果（丢掉纪录 /
+ * 丢掉历史）合并成一个决定，玩家想只清历史时无从下手，而合并带来的便利
+ * 仅仅是少点一次。
+ *
+ * @param isMuted        当前是否静音（来自 `GameState.isMuted`，即 prefs 的投影）。
+ * @param highScore      当前最高分，显示在「清空最高分」旁边 —— 让玩家知道
+ *                       自己要删掉什么。
+ * @param historyCount   当前历史记录条数，同上。
+ * @param versionName    版本号，由调用方从 BuildConfig 传入（UI 层不直接
+ *                       依赖 BuildConfig，便于预览与测试）。
+ * @param onToggleMute   切换静音。
+ * @param onClearHighScore 清空最高分（已经过二次确认）。
+ * @param onClearHistory   清空历史记录（已经过二次确认）。
+ * @param onBack         返回上一屏。
+ */
+@Composable
+fun SettingsScreen(
+    isMuted: Boolean,
+    highScore: Int,
+    historyCount: Int,
+    versionName: String,
+    onToggleMute: () -> Unit,
+    onClearHighScore: () -> Unit,
+    onClearHistory: () -> Unit,
+    onBack: () -> Unit,
+) {
+    // 待确认的清空动作。null = 没有确认框在显示。
+    //
+    // 用一个可空的枚举而不是两个独立 boolean：两个 boolean 能表达出
+    // 「两个确认框同时显示」这种不存在的状态，而这里语义上只可能有一个。
+    var pending by remember { mutableStateOf<PendingClear?>(null) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(SushiBgDark)
+            .systemBarsPadding(),
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // ---- 顶栏 ----
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "返回",
+                        tint = Color(0xFFFFE8C5),
+                    )
+                }
+                Text(
+                    text = "设置",
+                    color = Color(0xFFFFE8C5),
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp),
+            ) {
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // ================= 音效 =================
+                SectionTitle("音效")
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "游戏音效",
+                            color = Color(0xFFFFE8C5),
+                            fontSize = 16.sp,
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            // 开关标签描述的是「音效开着吗」，而底层字段是
+                            // isMuted（静音吗）—— 两者相反。副标题明说当前
+                            // 状态，避免玩家对着一个反义开关猜。
+                            text = if (isMuted) "已关闭" else "已开启",
+                            color = Color(0x99FFE8C5),
+                            fontSize = 13.sp,
+                        )
+                    }
+                    Switch(
+                        // 开关的 checked 表示「音效开启」= !isMuted。
+                        checked = !isMuted,
+                        onCheckedChange = { onToggleMute() },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Color(0xFF8BC34A),
+                            uncheckedThumbColor = Color(0xFFFFE8C5),
+                            uncheckedTrackColor = Color(0x33FFE8C5),
+                        ),
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // ================= 数据 =================
+                SectionTitle("数据")
+
+                DangerRow(
+                    title = "清空最高分",
+                    // 显示当前值：让玩家清楚要删掉的是什么，而不是点一个
+                    // 抽象的「清空」。0 分时无可清空，按钮也就没必要可点。
+                    subtitle = if (highScore > 0) "当前：$highScore 分" else "当前没有记录",
+                    enabled = highScore > 0,
+                    onClick = { pending = PendingClear.HIGH_SCORE },
+                )
+
+                DangerRow(
+                    title = "清空历史记录",
+                    subtitle = if (historyCount > 0) "共 $historyCount 条" else "暂无记录",
+                    enabled = historyCount > 0,
+                    onClick = { pending = PendingClear.HISTORY },
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // ================= 关于 =================
+                SectionTitle("关于")
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 12.dp),
+                ) {
+                    Text(
+                        text = "版本",
+                        color = Color(0xFFFFE8C5),
+                        fontSize = 16.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = versionName,
+                        color = Color(0x99FFE8C5),
+                        fontSize = 15.sp,
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(32.dp))
+            }
+        }
+    }
+
+    // ---- 清空的二次确认 ----
+    //
+    // 与 ExitConfirmDialog 同一套惯例：破坏性操作先问，返回键 / 点外部
+    // 一律取消。文案里明说「不可恢复」—— 这两项都没有撤销入口。
+    pending?.let { target ->
+        val (title, body) = when (target) {
+            PendingClear.HIGH_SCORE ->
+                "清空最高分？" to "最高分将归零，不可恢复。\n历史记录不受影响。"
+            PendingClear.HISTORY ->
+                // 附带说明会一并清掉未完成的对局 —— 否则玩家会发现菜单上的
+                // 「继续上局」凭空消失，而确认框没提过这件事。
+                "清空历史记录？" to "全部对局记录将被删除，不可恢复。\n未完成的对局也会一并清除。"
+        }
+
+        AlertDialog(
+            onDismissRequest = { pending = null },
+            properties = DialogProperties(
+                dismissOnBackPress = true,
+                dismissOnClickOutside = true,
+            ),
+            shape = RoundedCornerShape(16.dp),
+            containerColor = Color(0xFF2A1810),
+            title = {
+                Text(
+                    text = title,
+                    color = Color(0xFFFFE8C5),
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            text = {
+                Text(
+                    text = body,
+                    color = Color(0xCCFFFFFF),
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                ) {
+                    // 破坏性操作用描边而非实心：实心是「推荐操作」的视觉
+                    // 语言，而这里推荐的是取消。
+                    OutlinedButton(
+                        onClick = {
+                            when (target) {
+                                PendingClear.HIGH_SCORE -> onClearHighScore()
+                                PendingClear.HISTORY -> onClearHistory()
+                            }
+                            pending = null
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = Color(0xFFEC407A),
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = "清空",
+                            fontSize = 16.sp,
+                            modifier = Modifier.padding(vertical = 6.dp),
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = { pending = null },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.Transparent,
+                            contentColor = Color(0xCCFFFFFF),
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = "取消",
+                            fontSize = 14.sp,
+                            modifier = Modifier.padding(vertical = 4.dp),
+                        )
+                    }
+                }
+            },
+        )
+    }
+}
+
+/** 待确认的清空目标。见 [SettingsScreen] 里 `pending` 的说明。 */
+private enum class PendingClear { HIGH_SCORE, HISTORY }
+
+/** 分区标题。 */
+@Composable
+private fun SectionTitle(text: String) {
+    Text(
+        text = text,
+        color = Color(0xFFFFB347),
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+    )
+}
+
+/**
+ * 一行破坏性操作。
+ *
+ * `enabled = false` 时整行变暗且不可点 —— 没有记录可清时，让按钮可点然后
+ * 弹一个「清空了 0 条」的确认框是在浪费玩家的一次决策。
+ */
+@Composable
+private fun DangerRow(
+    title: String,
+    subtitle: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                color = if (enabled) Color(0xFFFFE8C5) else Color(0x66FFE8C5),
+                fontSize = 16.sp,
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = subtitle,
+                color = Color(0x99FFE8C5),
+                fontSize = 13.sp,
+            )
+        }
+        OutlinedButton(
+            onClick = onClick,
+            enabled = enabled,
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = Color(0xFFEC407A),
+                disabledContentColor = Color(0x66FFE8C5),
+            ),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.widthIn(min = 88.dp),
+        ) {
+            Text(text = "清空", fontSize = 14.sp)
+        }
+    }
+}
