@@ -1,10 +1,7 @@
 package top.windyvalley.magicsushi.ui.screen
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
@@ -15,14 +12,33 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import top.windyvalley.magicsushi.engine.HighScoreRules
 
 /**
  * 屏幕底部分数条。
  * - 大字号：当前分（48sp）
  * - 小字号：最高分（24sp）
  * - 数字滚动动画
- * - 最高分更新时闪烁
+ *
+ * ## 为什么这里没有「破纪录」闪烁效果
+ *
+ * 曾经有：最高分变大时闪一次橙色 + 显示「新纪录！」1 秒（连同 engine 里的
+ * `HighScoreRules.shouldCelebrateHighScore` 一套判据和 6 条测试）。
+ *
+ * 但它**在当前架构下不可能被看到**。`state.highScore` 上升只有一个写入点
+ * （`GameViewModel.recordCurrentRound`），而那个函数只被 `onGameOver` /
+ * `onRestart` / `onQuit` 调用 —— 三者都意味着本局已经结束。最高分变化的
+ * 那一刻 `phase` 已是 `GAME_OVER`，`GameOverDialog` 全屏盖在分数条上面，
+ * 1 秒的动画在遮挡下跑完。
+ *
+ * 换句话说：游戏进行中最高分**永远不变**，它只在结算时更新。这个效果等的
+ * 事件，在它可见的时候从不发生。
+ *
+ * 玩家真正看到的「🎉 新纪录！」在 [GameOverDialog] 里，走的是
+ * `state.isNewRecord`（结算时同步写入，不经 Flow）。那条路径是有效的。
+ *
+ * ⚠️ 若将来改成「游戏中实时更新最高分」（比如当前分超过纪录就立刻顶上去），
+ * 这个效果才有意义，届时再加回来 —— 且要注意最高分是异步 Flow 派生的，
+ * 冷启动 `0 → 真实值` 的跳变不能误判成破纪录。
  */
 @Composable
 fun ScoreOverlay(
@@ -35,31 +51,6 @@ fun ScoreOverlay(
         animationSpec = tween(durationMillis = 300),
         label = "currentScore"
     )
-    
-    var previousHigh by remember { mutableStateOf(highScore) }
-    var highJustChanged by remember { mutableStateOf(false) }
-    LaunchedEffect(highScore) {
-        // FIX_PLAN D8：判据不能只看「最高分变大了」。
-        //
-        // 设置迁到 DataStore 后最高分是异步装载的，冷启动时这里会先收到
-        // 占位值 0、随后被真实值（比如 500）替换。那次 0 → 500 的跳变同样
-        // 满足「变大了」，于是玩家一进游戏就会看到一次莫名的破纪录庆祝。
-        //
-        // 真正的区分点是**本局是否已经得过分**：异步装载发生在开局前，
-        // 那时 currentScore 必然为 0。规则连同两个方向的用例都在
-        // engine 的 HighScoreRulesTest 里锁死。
-        if (HighScoreRules.shouldCelebrateHighScore(
-                previousHigh = previousHigh,
-                newHigh = highScore,
-                currentScore = currentScore,
-            )
-        ) {
-            highJustChanged = true
-            kotlinx.coroutines.delay(1000)
-            highJustChanged = false
-        }
-        previousHigh = highScore
-    }
     
     Row(
         modifier = modifier
@@ -95,21 +86,9 @@ fun ScoreOverlay(
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Normal
             )
-            AnimatedVisibility(
-                visible = highJustChanged,
-                enter = fadeIn(),
-                exit = fadeOut()
-            ) {
-                Text(
-                    text = "新纪录！",
-                    color = Color(0xFFE85D2F),
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
             Text(
                 text = highScore.toString(),
-                color = if (highJustChanged) Color(0xFFE85D2F) else Color(0xFFFFE8C5),
+                color = Color(0xFFFFE8C5),
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold
             )

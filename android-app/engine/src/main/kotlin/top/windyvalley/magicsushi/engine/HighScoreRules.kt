@@ -1,17 +1,21 @@
 package top.windyvalley.magicsushi.engine
 
 /**
- * 最高分相关的纯规则。
+ * 「破纪录」的唯一定义。
  *
- * ## 为什么这些判断要从 app 模块搬到 engine（FIX_PLAN D8）
+ * ## 为什么这个判断要放在 engine 而不是 app（FIX_PLAN D8）
  *
- * 迁 DataStore 之前，「是否破纪录」写在 `PrefsRepository.saveHighScore()`
- * 里（`if (score > currentHigh)`），「是否放庆祝动画」写在 `ScoreOverlay`
- * 的 `LaunchedEffect` 里。两处都是 Android 类内部的隐式规则，**无法单测**。
+ * 它曾经写在 `PrefsRepository.saveHighScore()` 里（`if (score > currentHigh)`）
+ * —— Android 类内部的隐式规则，**无法单测**。提成纯函数后，这条判据同时被
+ * [RoundSettlement]（结算与历史标记）和 [HighScoreDerivation]（从历史派生
+ * 最高分）消费，只有一份定义、一处测试。
  *
- * 迁移把持久化改成异步后，这两条规则同时变得更容易出错（见
- * [shouldCelebrateHighScore] 的说明），所以先把它们提成纯函数、补上测试，
- * 再动存储层。顺序反了就等于在没有安全网的地方改地基。
+ * ## 曾经还有一个 shouldCelebrateHighScore
+ *
+ * 它判断「最高分变化时该不该播庆祝动画」，服务于 `ScoreOverlay` 里最高分
+ * 旁边闪一下「新纪录！」的效果。已连同那个效果一起删除 —— 原因见
+ * `ScoreOverlay` 的类注释：最高分只在结算时变化，而那一刻结算面板全屏
+ * 盖住了分数条，动画永远看不到。
  */
 object HighScoreRules {
 
@@ -39,43 +43,4 @@ object HighScoreRules {
      */
     fun isNewRecord(candidate: Int, currentHigh: Int): Boolean =
         candidate > 0 && candidate > currentHigh
-
-    /**
-     * 最高分从 [previousHigh] 变成 [newHigh] 时，是否应该播「破纪录」庆祝动画。
-     *
-     * ## 为什么不能只判断 `newHigh > previousHigh`
-     *
-     * 最高分是**异步**装载的 —— UI 会先看到占位值 0，随后才被真实值（比如
-     * 500）替换。这次 `0 → 500` 的跳变满足 `newHigh > previousHigh`，于是
-     * **冷启动进游戏就会无故放一次庆祝动画**。
-     *
-     * ⚠️ 这个坑在最高分改为「从历史记录派生」（见 [HighScoreDerivation]）
-     * 之后**依然存在**：数据源虽然从 DataStore 的 prefs 换成了历史记录的
-     * `Flow`，但异步这一点没变，冷启动照样先发 0 再发真实值。
-     *
-     * 区分真假的关键不在最高分本身，而在**本局是否得过分**：
-     *
-     * | 场景 | previousHigh | newHigh | currentScore | 结果 |
-     * |---|---|---|---|---|
-     * | 冷启动异步加载 | 0 | 500 | 0（还没开局） | 不庆祝 |
-     * | 首局破纪录（史上第一局） | 0 | 300 | 300 | 庆祝 |
-     * | 正常破纪录 | 500 | 800 | 800 | 庆祝 |
-     *
-     * 判据：最高分确实上升了，**且**本局已经得过分。异步加载发生在开局前，
-     * 那时 `currentScore == 0`，因此能被干净地排除。
-     *
-     * ## 为什么不直接复用 [isNewRecord]
-     *
-     * 两者问的不是同一件事。[isNewRecord] 问「这个成绩够不够格成为纪录」，
-     * 输入是**一局的得分**；本函数问「最高分这次变化值不值得庆祝」，输入是
-     * **最高分的前后两个值**。冷启动那次 0 → 500 里，500 并不是谁的本局
-     * 得分，用 isNewRecord 去套会得到"是新纪录"的错误结论。
-     *
-     * @param currentScore 本局当前得分。0 表示还没消除过任何一次。
-     */
-    fun shouldCelebrateHighScore(
-        previousHigh: Int,
-        newHigh: Int,
-        currentScore: Int,
-    ): Boolean = newHigh > previousHigh && currentScore > 0
 }
