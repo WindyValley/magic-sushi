@@ -1,6 +1,11 @@
 // app/build.gradle.kts
 // Magic Sushi — app 模块配置（Kotlin + Jetpack Compose）
 
+// ⚠️ Kotlin DSL 里用 java.util.Properties 必须显式 import。
+// 写成全限定名 `java.util.Properties()` 会报 "Unresolved reference 'util'"
+// —— Gradle 的脚本编译器不解析内联的全限定 java 包名。
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -17,17 +22,25 @@ android {
         // 版本号遵循 SemVer（https://semver.org/lang/zh-CN/）。
         //
         // versionName = MAJOR.MINOR.PATCH
-        //   MAJOR  破坏性变更 / 存档不兼容。0 表示还在初始开发阶段，
-        //          公开 API 与存档格式都不保证稳定。
+        //   MAJOR  破坏性变更 / 存档不兼容。1 表示功能完整、格式已定，
+        //          之后改存档结构要考虑迁移。
         //   MINOR  新增功能（向后兼容）
         //   PATCH  仅修 bug
         //
         // versionCode 是 Android 用来判断"哪个包更新"的整数，与 SemVer 无关，
         // 只需**单调递增**。这里按发布次数计数：
-        //   1 → v0.1.0    2 → v0.1.1    3 → v0.2.0    4 → v0.2.1（本次）
+        //   1 → v0.1.0    2 → v0.1.1    3 → v0.2.0    4 → v0.2.1
+        //   5 → v1.0.0（本次）
         //
         // ⚠️ 改这里就够了：设置页的版本号走 BuildConfig.VERSION_NAME
         // （MainActivity 传给 SettingsScreen），不存在第二处需要同步的常量。
+        //
+        // v1.0.0 为什么是 MAJOR：这是第一个「达到发布标准」的版本，含义是
+        // 结束 0.x 的初始开发阶段 —— 0.x 期间不保证存档格式与公开 API 稳定，
+        // 1.0 之后要保证。功能上 v0.2.1 → v1.0.0 只修了 4 个渲染层 bug
+        // （下落动画的跳动、回弹、两类 tile 的首帧闪），没加新功能，
+        // 但 SemVer 的 1.0.0 表达的是**承诺**而不是功能量：
+        // 见 semver.org 第 5 条 —— "1.0.0 版本定义了公共 API"。
         //
         // v0.2.1 为什么是 PATCH 而不是 MINOR：只换了图标资源（全套 mipmap
         // 密度 + 首次补上自适应图标），玩家能做的事一件没变。自适应图标虽然
@@ -36,8 +49,8 @@ android {
         //
         // v0.2.0 当时为什么是 MINOR：v0.1.1 之后新增了设置页面（静音开关
         // 首次有 UI 入口、清空历史记录、关于），是向后兼容的新功能。
-        versionCode = 4
-        versionName = "0.2.1"
+        versionCode = 5
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -45,8 +58,41 @@ android {
         }
     }
 
+    // Release 签名配置。
+    //
+    // 密码和 keystore 路径来自 android-app/keystore.properties，该文件与
+    // *.jks 一起被 .gitignore 挡住（已用 `git check-ignore` 验证），**不进仓库**。
+    //
+    // 文件不存在时 signingConfigs 留空，release 构建会产出 unsigned APK ——
+    // 这样 CI / 新克隆的仓库仍能跑通 assembleRelease，不会因为缺密钥而失败。
+    // 想出可安装的包就得自己建 keystore，见 keystore.properties.example。
+    signingConfigs {
+        val keystorePropsFile = rootProject.file("keystore.properties")
+        if (keystorePropsFile.exists()) {
+            val keystoreProps = Properties().apply {
+                keystorePropsFile.inputStream().use { load(it) }
+            }
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+                // 两种签名方案都开：v1 (JAR) 兼容 API < 24，v2 (APK Signature
+                // Scheme) 是 API 24+ 的标准，验证更快且防篡改更强。
+                enableV1Signing = true
+                enableV2Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
+            // 有 keystore 就签名，没有就留 null（产出 unsigned APK）。
+            signingConfig = signingConfigs.findByName("release")
+
+            // ⚠️ 保持关闭。开启 R8 需要先验证混淆规则对 Compose + kotlinx
+            // 序列化不误伤，那是独立的一轮验证工作，不适合和发布挤在一起。
+            // 现在 APK 约 8MB，体积不是瓶颈。
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

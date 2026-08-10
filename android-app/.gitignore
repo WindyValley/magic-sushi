@@ -17,8 +17,11 @@ out/
 captures/
 
 # Keystore
+# ⚠️ 签名密钥与密码绝不进仓库。keystore.properties.example 是模板（会提交），
+#    keystore.properties 是真实密码（被下面这行挡住）。
 *.jks
 *.keystore
+keystore.properties
 
 # NDK
 .cxx/
@@ -39,8 +42,9 @@ release/
 .DS_Store
 Thumbs.db
 
-# Wrapper（可选保留；本项目保留 wrapper 配置但占位 jar）
-# gradle/wrapper/gradle-wrapper.jar
+# Gradle Wrapper
+# gradle-wrapper.jar **要提交** —— 它是 wrapper 的启动器，缺了 ./gradlew 跑不起来。
+# （v1.0.0 之前这里曾是个文本占位符，导致 clone 下来无法构建，已换成真 jar。）
 
 # Local config
 **/.kotlin/
