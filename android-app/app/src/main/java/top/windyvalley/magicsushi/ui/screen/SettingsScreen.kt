@@ -44,9 +44,9 @@ import top.windyvalley.magicsushi.ui.theme.SushiBgDark
 /**
  * 设置页（单层，无子页）。
  *
- * 三个分区：
+ * 两个分区：
  *  - **音效**    —— 静音开关
- *  - **数据**    —— 清空最高分 / 清空历史记录（各带二次确认）
+ *  - **数据**    —— 清空历史记录（带二次确认）
  *  - **关于**    —— 版本号
  *
  * ## 为什么这个页面值得单独存在
@@ -56,42 +56,41 @@ import top.windyvalley.magicsushi.ui.theme.SushiBgDark
  * 由 mutedFlow 投影），但**从来没有任何 UI 调用它** —— 一个零入口的功能。
  * 玩家无法关掉音效，而代码看起来功能齐备。
  *
+ * ## 为什么没有「清空最高分」
+ *
+ * 用户决定：最高分是玩家的长期成就，不提供清空入口。历史记录是流水，
+ * 清空它属于正常的数据管理；而抹掉最高分更像是"重置存档"，那是另一种
+ * 需求，且误触代价高（不可恢复且无从找回）。
+ *
+ * 与之配套的 `PrefsRepository.resetHighScore()` / `GameViewModel
+ * .clearHighScore()` 也一并删除，不留没有调用点的代码 —— 悬空的写入路径
+ * 迟早被误用，而"暂时留着以后可能要"从来不成立。
+ *
  * ## 清空数据为什么要二次确认
  *
- * 两项都是**不可撤销**的删除。惯例与退出对局一致（见 [ExitConfirmDialog]）：
+ * 这是一个**不可撤销**的删除。惯例与退出对局一致（见 [ExitConfirmDialog]）：
  * 破坏性操作一律先问一次，且确认框的默认结果（返回键 / 点外部）是取消。
  *
- * 刻意**不做**「清空所有数据」这种一键项：它把两个不同后果（丢掉纪录 /
- * 丢掉历史）合并成一个决定，玩家想只清历史时无从下手，而合并带来的便利
- * 仅仅是少点一次。
- *
  * @param isMuted        当前是否静音（来自 `GameState.isMuted`，即 prefs 的投影）。
- * @param highScore      当前最高分，显示在「清空最高分」旁边 —— 让玩家知道
- *                       自己要删掉什么。
- * @param historyCount   当前历史记录条数，同上。
+ * @param historyCount   当前历史记录条数，显示在「清空历史记录」旁边 ——
+ *                       让玩家知道自己要删掉什么。
  * @param versionName    版本号，由调用方从 BuildConfig 传入（UI 层不直接
  *                       依赖 BuildConfig，便于预览与测试）。
  * @param onToggleMute   切换静音。
- * @param onClearHighScore 清空最高分（已经过二次确认）。
- * @param onClearHistory   清空历史记录（已经过二次确认）。
+ * @param onClearHistory 清空历史记录（已经过二次确认）。
  * @param onBack         返回上一屏。
  */
 @Composable
 fun SettingsScreen(
     isMuted: Boolean,
-    highScore: Int,
     historyCount: Int,
     versionName: String,
     onToggleMute: () -> Unit,
-    onClearHighScore: () -> Unit,
     onClearHistory: () -> Unit,
     onBack: () -> Unit,
 ) {
-    // 待确认的清空动作。null = 没有确认框在显示。
-    //
-    // 用一个可空的枚举而不是两个独立 boolean：两个 boolean 能表达出
-    // 「两个确认框同时显示」这种不存在的状态，而这里语义上只可能有一个。
-    var pending by remember { mutableStateOf<PendingClear?>(null) }
+    // 清空历史的确认框是否显示。
+    var showClearConfirm by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -174,19 +173,12 @@ fun SettingsScreen(
                 SectionTitle("数据")
 
                 DangerRow(
-                    title = "清空最高分",
-                    // 显示当前值：让玩家清楚要删掉的是什么，而不是点一个
-                    // 抽象的「清空」。0 分时无可清空，按钮也就没必要可点。
-                    subtitle = if (highScore > 0) "当前：$highScore 分" else "当前没有记录",
-                    enabled = highScore > 0,
-                    onClick = { pending = PendingClear.HIGH_SCORE },
-                )
-
-                DangerRow(
                     title = "清空历史记录",
+                    // 显示当前条数：让玩家清楚要删掉的是什么，而不是点一个
+                    // 抽象的「清空」。无记录时无可清空，按钮也就没必要可点。
                     subtitle = if (historyCount > 0) "共 $historyCount 条" else "暂无记录",
                     enabled = historyCount > 0,
-                    onClick = { pending = PendingClear.HISTORY },
+                    onClick = { showClearConfirm = true },
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -220,19 +212,10 @@ fun SettingsScreen(
     // ---- 清空的二次确认 ----
     //
     // 与 ExitConfirmDialog 同一套惯例：破坏性操作先问，返回键 / 点外部
-    // 一律取消。文案里明说「不可恢复」—— 这两项都没有撤销入口。
-    pending?.let { target ->
-        val (title, body) = when (target) {
-            PendingClear.HIGH_SCORE ->
-                "清空最高分？" to "最高分将归零，不可恢复。\n历史记录不受影响。"
-            PendingClear.HISTORY ->
-                // 附带说明会一并清掉未完成的对局 —— 否则玩家会发现菜单上的
-                // 「继续上局」凭空消失，而确认框没提过这件事。
-                "清空历史记录？" to "全部对局记录将被删除，不可恢复。\n未完成的对局也会一并清除。"
-        }
-
+    // 一律取消。文案里明说「不可恢复」—— 这没有撤销入口。
+    if (showClearConfirm) {
         AlertDialog(
-            onDismissRequest = { pending = null },
+            onDismissRequest = { showClearConfirm = false },
             properties = DialogProperties(
                 dismissOnBackPress = true,
                 dismissOnClickOutside = true,
@@ -241,7 +224,7 @@ fun SettingsScreen(
             containerColor = Color(0xFF2A1810),
             title = {
                 Text(
-                    text = title,
+                    text = "清空历史记录？",
                     color = Color(0xFFFFE8C5),
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
@@ -251,7 +234,15 @@ fun SettingsScreen(
             },
             text = {
                 Text(
-                    text = body,
+                    // 三句话各有必要：
+                    //  1. 不可恢复 —— 这是破坏性操作的核心告知
+                    //  2. 未完成的对局也会清 —— 否则玩家会发现菜单上的
+                    //     「继续上局」凭空消失，而确认框没提过
+                    //  3. 最高分不受影响 —— 主动打消顾虑。玩家最怕的就是
+                    //     一个「清空」把长期成就也带走了
+                    text = "全部对局记录将被删除，不可恢复。\n" +
+                        "未完成的对局也会一并清除。\n" +
+                        "最高分不受影响。",
                     color = Color(0xCCFFFFFF),
                     fontSize = 14.sp,
                     textAlign = TextAlign.Center,
@@ -268,11 +259,8 @@ fun SettingsScreen(
                     // 语言，而这里推荐的是取消。
                     OutlinedButton(
                         onClick = {
-                            when (target) {
-                                PendingClear.HIGH_SCORE -> onClearHighScore()
-                                PendingClear.HISTORY -> onClearHistory()
-                            }
-                            pending = null
+                            onClearHistory()
+                            showClearConfirm = false
                         },
                         colors = ButtonDefaults.outlinedButtonColors(
                             contentColor = Color(0xFFEC407A),
@@ -288,7 +276,7 @@ fun SettingsScreen(
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Button(
-                        onClick = { pending = null },
+                        onClick = { showClearConfirm = false },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Color.Transparent,
                             contentColor = Color(0xCCFFFFFF),
@@ -307,9 +295,6 @@ fun SettingsScreen(
         )
     }
 }
-
-/** 待确认的清空目标。见 [SettingsScreen] 里 `pending` 的说明。 */
-private enum class PendingClear { HIGH_SCORE, HISTORY }
 
 /** 分区标题。 */
 @Composable

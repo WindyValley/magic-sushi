@@ -1161,29 +1161,6 @@ class GameViewModel(
     // ========================================================================
 
     /**
-     * 清空最高分。
-     *
-     * ⚠️ 同时清掉本局的 [GameState.isNewRecord] 标记：那个标记的含义是
-     * 「本局分数 > 当时的最高分」，最高分被重置后它引用的是一个已经不存在的
-     * 基准。留着会让结算面板继续显示「🏆 新纪录」，而玩家刚刚亲手把纪录清成
-     * 了 0 —— 界面在自相矛盾。
-     *
-     * 不重算 isNewRecord（比如改成「score > 0 就算新纪录」）：清空动作
-     * 不该顺手给玩家颁发一个他没挣到的纪录。
-     *
-     * @param onDone 落盘后的回调（主线程），供 UI 提示「已清空」。
-     */
-    fun clearHighScore(onDone: () -> Unit = {}) {
-        viewModelScope.launch {
-            prefsRepo.resetHighScore()
-            // highScore 字段本身由 init 里的 highScoreFlow collect 自动投影，
-            // 这里只需处理它带不动的派生标记。
-            _state.update { it.copy(isNewRecord = false) }
-            onDone()
-        }
-    }
-
-    /**
      * 清空历史记录。
      *
      * ## 为什么连快照一起清
@@ -1194,6 +1171,12 @@ class GameViewModel(
      *
      * 顺带也避免了更隐蔽的一种：那个残局若在清空前已被结算过
      * （currentRoundRecorded），恢复它还会因幂等保护而不再入库。
+     *
+     * ## 为什么不碰最高分
+     *
+     * 最高分是玩家的长期成就，不随「清空记录」一起消失（用户明确要求）。
+     * 这也是设置页只有一个清空项的原因 —— 没有「清空最高分」入口，
+     * 相应的 `PrefsRepository.resetHighScore()` 也不存在。
      *
      * @param onDone 落盘后的回调（主线程），供 UI 提示「已清空」。
      */

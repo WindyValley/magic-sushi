@@ -289,9 +289,9 @@ private fun AppRoot(
         AppScreen.Settings -> {
             BackHandler { screen = AppScreen.Menu }
 
-            // isMuted / highScore 都从 GameState 读 —— 它们是
-            // PrefsRepository 的投影（见 GameViewModel 的 init），所以设置页
-            // 改完之后这里会自动跟上，不需要手工刷新。
+            // isMuted 从 GameState 读 —— 它是 PrefsRepository 的投影
+            // （见 GameViewModel 的 init），所以设置页切换后这里会自动跟上，
+            // 不需要手工刷新。
             val gameState by viewModel.state.collectAsState()
             // 历史条数只用来在「清空历史记录」旁边显示 N 条 + 决定按钮是否
             // 可点，所以取当前快照即可。
@@ -299,14 +299,14 @@ private fun AppRoot(
 
             SettingsScreen(
                 isMuted = gameState.isMuted,
-                highScore = gameState.highScore,
                 historyCount = records.size,
                 versionName = BuildConfig.VERSION_NAME,
                 onToggleMute = { viewModel.toggleMute() },
-                onClearHighScore = { viewModel.clearHighScore() },
                 // 清空历史会连快照一起清（见 VM 的说明），所以本地那份
                 // 「菜单是否显示继续上局」的缓存也要失效 —— 否则回到菜单
                 // 仍会看到「继续上局」，点进去却恢复不出任何东西。
+                //
+                // 最高分刻意不动：它是长期成就，不随清空记录消失。
                 onClearHistory = { viewModel.clearHistory { hasSavedRound = false } },
                 onBack = { screen = AppScreen.Menu },
             )
