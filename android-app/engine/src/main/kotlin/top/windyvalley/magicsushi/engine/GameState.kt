@@ -209,6 +209,22 @@ data class GameState(
     val highScore: Int = 0,
     val isRollback: Boolean = false,           // 上次交换无效，需弹回
     val isNewRecord: Boolean = false,          // 本局打破最高分
+    /**
+     * 本局是否已经结算（成绩已入历史 / 最高分已算过）。
+     *
+     * ## 为什么要暴露给 UI
+     *
+     * 退出时的二级确认弹窗要决定「保留进度」这个选项该不该出现，判据是
+     * [RoundExitOptions.canKeepProgress]，其中一项就是「本局尚未结算」——
+     * 已结算的局若还留快照，玩家恢复后玩完会因幂等保护不再入库，等于白玩。
+     *
+     * 这个事实此前只存在于 VM 的私有字段 `currentRoundRecorded` 里，UI 拿
+     * 不到。作为 [GameState] 的投影暴露出来，UI 才能自己算出该显示什么，
+     * 而不是让 VM 反过来告诉 UI「你该画几个按钮」。
+     *
+     * 由 `startGame()` / `restoreSnapshot()` 复位为 false。
+     */
+    val roundFinalized: Boolean = false,
     // ------------------------------------------------------------------
     // Animation (T-ANIM-001)
     // ------------------------------------------------------------------

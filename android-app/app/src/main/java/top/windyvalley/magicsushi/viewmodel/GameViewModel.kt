@@ -266,8 +266,22 @@ class GameViewModel(
      * onRestart 都会跑。若各写一次，同一局会在历史里出现两条。
      *
      * 这个标记保证「一局最多入库一次」。由 [startGame] 复位。
+     *
+     * ## 为什么它是 [GameState] 的投影而不是独立字段
+     *
+     * 退出确认弹窗要靠这个事实决定「保留进度」该不该出现（见
+     * [RoundExitOptions]），所以 UI 必须能读到它。
+     *
+     * 一旦 UI 要读，就有两种做法：VM 里存一份 + 往 state 里同步一份，或者
+     * 干脆让这个属性**就是** state 里那个字段的别名。选后者 —— 前者是典型的
+     * 双份真相，本项目已经在最高分上栽过一次（热缓存写入未同步生效，
+     * 见 commit 24f7863）。这里没有任何一行代码需要「记得同步」。
      */
-    private var currentRoundRecorded = false
+    private var currentRoundRecorded: Boolean
+        get() = _state.value.roundFinalized
+        set(value) {
+            _state.update { it.copy(roundFinalized = value) }
+        }
 
     /**
      * 本局是否已通过「保留并返回首页」挂起。

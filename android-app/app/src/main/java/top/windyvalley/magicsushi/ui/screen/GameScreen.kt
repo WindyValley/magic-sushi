@@ -20,8 +20,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -29,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import top.windyvalley.magicsushi.engine.GamePhase
 import top.windyvalley.magicsushi.engine.GameState
+import top.windyvalley.magicsushi.engine.RoundExitOptions
 import top.windyvalley.magicsushi.ui.canvas.GameCanvas
 import top.windyvalley.magicsushi.ui.theme.SushiBgDark
 import top.windyvalley.magicsushi.viewmodel.GameViewModel
@@ -62,6 +67,25 @@ fun GameScreen(
     onQuit: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsState()
+
+    // 退出确认弹窗是否显示。
+    //
+    // 这是**纯 UI 状态**，刻意不放进 GameState：它不影响对局，VM 也不需要
+    // 知道玩家正在犹豫。（对比 `showPauseDialog` 那个曾经的 bug —— 那个变量
+    // 的问题不是「局部」，而是它取代了 phase 成为暂停的判据却从不调用
+    // onPause()。这里没有对应风险：确认弹窗没有任何 VM 侧的对偶状态。）
+    var showExitConfirm by remember { mutableStateOf(false) }
+
+    // 离开暂停态时复位。
+    //
+    // 不复位会残留：玩家打开确认弹窗 → 切后台 → ON_STOP 存快照 → 回到前台
+    // 仍是 PAUSED（不自动继续，见 onSystemResume），此时弹窗还在，尚可接受；
+    // 但若这期间对局以别的方式结束（倒计时归零走不到这里，因为暂停时计时器
+    // 已停；真正的来源是 restoreSnapshot / startGame 重置了 phase），
+    // 弹窗会盖在一个已经不存在的对局上。
+    LaunchedEffect(state.phase) {
+        if (state.phase != GamePhase.PAUSED) showExitConfirm = false
+    }
 
     Box(
         modifier = Modifier
@@ -139,18 +163,59 @@ fun GameScreen(
             onResume = { viewModel.onResume() },
             onRestart = { viewModel.onRestart() },
             onQuit = {
-                // 暂停面板的「退出」= **挂起这一局**，不是结束它。
+                // 暂停面板的退出按钮不再直接执行任何退出动作 —— 它只是
+                // 打开二级确认。
                 //
-                // 刻意不走 viewModel.onQuit：那个会结算入库 + 清快照。
-                // 玩家在暂停时退出的意图是「先放着，待会儿接着玩」，若
-                // 此时结算：
-                //   1. 一局玩两半会在历史里留下两条记录
-                //   2. 结算顺带清快照 → 回到菜单没有「继续上局」，那局没了
+                // 此前这里直接调 onSuspendToMenu（保留快照），于是「退出」
+                // 这一个按钮绑死了一种语义：想彻底结束这局的玩家被迫留下
+                // 一个快照，下次进菜单还要再面对一次「继续上局」。而按钮
+                // 若改叫「退出」，想保留的人又不敢点。
                 //
-                // onSuspendToMenu 只写快照不结算，且同步落盘后才回调 ——
-                // 保证菜单查 hasRestorableSnapshot 时快照已经在盘上。
+                // 根因是「退出」不是一个动作而是一个岔路口，所以改为问玩家。
+                // 两条路分别对应 VM 里已有的两种语义（onSuspendToMenu /
+                // onQuit），没有引入第三种退出路径。
+                showExitConfirm = true
+            },
+        )
+    }
+
+    // 退出二级确认。
+    //
+    // 叠在 PauseDialog 之上（两者都在 PAUSED 下渲染）—— 取消后玩家回到
+    // 暂停面板，而不是直接回到棋盘：取消的语义是「我不退出了」，不是
+    // 「我要继续玩」。后者由暂停面板的「继续」表达。
+    if (state.phase == GamePhase.PAUSED && showExitConfirm) {
+        ExitConfirmDialog(
+            // 「值不值得保留」的判断在 engine 的纯函数里（有单测覆盖），
+            // UI 只负责把对局现场喂进去。刻意不让 VM 直接给一个
+            // `showKeepButton` 之类的布尔 —— 那会把「画几个按钮」的决定
+            // 挪进 VM。
+            canKeepProgress = RoundExitOptions.canKeepProgress(
+                score = state.score,
+                remainingSeconds = state.remainingSeconds,
+                boardHasTiles = state.board.grid.flatten().any { it != null },
+                alreadyRecorded = state.roundFinalized,
+            ),
+            currentScore = state.score,
+            remainingSeconds = state.remainingSeconds,
+            onKeepAndExit = {
+                showExitConfirm = false
+                // 挂起：只写快照、不结算。成绩留到这局真正结束时再算。
+                // 同步落盘后才回调，保证菜单查 hasRestorableSnapshot 时
+                // 快照已经在盘上（否则表现为「刚退出却没有继续按钮」）。
                 viewModel.onSuspendToMenu(onSuspended = onQuit)
             },
+            onFinishAndExit = {
+                showExitConfirm = false
+                // 结束本局：结算入库 + 清快照。
+                //
+                // 0 分时这是唯一的出口 —— 用户决定「0 分退出默认丢弃本局
+                // 不保留」。注意 onQuit 内部对 0 分也会清快照（见其
+                // hadUnsettledScore == false 分支），所以「不保留」是
+                // 落实到盘上的，不只是不写新快照。
+                viewModel.onQuit(onRecorded = onQuit)
+            },
+            onCancel = { showExitConfirm = false },
         )
     }
 
