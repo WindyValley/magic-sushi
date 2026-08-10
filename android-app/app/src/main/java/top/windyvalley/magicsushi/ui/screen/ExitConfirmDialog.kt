@@ -39,8 +39,14 @@ import androidx.compose.ui.window.DialogProperties
  * 正式成绩，分数照样入历史、照样参与最高分结算（见 `RoundSettlement`）。
  * 被丢弃的只有「继续玩下去的机会」。
  *
- * 所以有分时叫「结束本局」并在正文里明说成绩会计入 —— 玩家点之前就知道
- * 会发生什么，而不是点完之后才发现。
+ * 所以叫「结束本局」，并把「成绩计入历史」放在正文里说明 —— 玩家点之前
+ * 就知道会发生什么，而不是点完之后才发现。
+ *
+ * ## 说明写正文，按钮只放动作
+ *
+ * 该说明曾经直接写进按钮（「结束本局并退出（成绩计入历史）」），15 个字
+ * 在按钮里过于拥挤，窄屏还会折行。按钮标签只承载**动作**，解释性内容
+ * 一律放正文 —— 那里有整行宽度可用，也不必为了塞字而压小字号。
  *
  * ## 0 分时为什么只有一个退出选项
  *
@@ -97,7 +103,8 @@ fun ExitConfirmDialog(
                 Text(
                     text = if (canKeepProgress) {
                         "当前 $currentScore 分，还剩 ${remainingSeconds}s。\n" +
-                            "可以先保留这一局，之后从首页继续。"
+                            "可以先保留这一局，之后从首页继续；\n" +
+                            "结束本局则成绩计入历史。"
                     } else {
                         // 0 分（或这局已无法恢复）：说清「不保留」是因为
                         // 没东西可保留，避免玩家以为是功能坏了。
@@ -129,7 +136,7 @@ fun ExitConfirmDialog(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(
-                            text = "保留进度并退出",
+                            text = "保留进度",
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(vertical = 6.dp),
@@ -138,9 +145,15 @@ fun ExitConfirmDialog(
                     Spacer(modifier = Modifier.height(8.dp))
                 }
 
-                // 结束本局。文案随「有没有分」变化：
-                //  - 有分：明说成绩会计入，因为它确实会（手动退出算正式成绩）
-                //  - 0 分：没有成绩可计入，多说反而让人困惑
+                // 结束本局。
+                //
+                // ⚠️ 文案必须短。曾经叫「结束本局并退出（成绩计入历史）」，
+                // 15 个字在按钮里过于拥挤（窄屏还会折行或被截断）。
+                // 「成绩计入历史」属于**说明**而非标签，已挪到正文，
+                // 那里有完整的一行可用。按钮只留动作本身。
+                //
+                // 有分 / 0 分文案不同：0 分时没有成绩可言，说「结束本局」
+                // 反而像在暗示有什么东西被结算了，直接叫「退出」。
                 OutlinedButton(
                     onClick = onFinishAndExit,
                     colors = ButtonDefaults.outlinedButtonColors(
@@ -150,9 +163,9 @@ fun ExitConfirmDialog(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        text = if (canKeepProgress) "结束本局并退出（成绩计入历史）" else "退出",
-                        fontSize = 14.sp,
-                        modifier = Modifier.padding(vertical = 4.dp),
+                        text = if (canKeepProgress) "结束本局" else "退出",
+                        fontSize = 16.sp,
+                        modifier = Modifier.padding(vertical = 6.dp),
                     )
                 }
 
