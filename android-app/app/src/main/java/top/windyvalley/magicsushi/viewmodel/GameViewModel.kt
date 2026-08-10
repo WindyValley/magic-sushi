@@ -29,6 +29,7 @@ import top.windyvalley.magicsushi.engine.GravityEngine
 import top.windyvalley.magicsushi.engine.HighScoreDerivation
 import top.windyvalley.magicsushi.engine.HighScoreRules
 import top.windyvalley.magicsushi.engine.RoundSettlement
+import top.windyvalley.magicsushi.engine.RoundTeardown
 import top.windyvalley.magicsushi.engine.GamePhase
 import top.windyvalley.magicsushi.engine.GameState
 import top.windyvalley.magicsushi.engine.MatchEngine
@@ -518,28 +519,23 @@ class GameViewModel(
         recordCurrentRound()
         timerJob?.cancel()
         swapJob?.cancel()
-        // 回菜单时把本局现场清零。
+        // 回菜单时把本局现场清干净。
         //
         // ## 为什么不只改 phase
         //
-        // 成绩已经入库，score / combo 留在 state 里没有任何用途，但会造成
-        // 一个可见的 bug：ViewModel 活得比 GameScreen 长，下次从菜单进游戏
-        // 时首帧读到的还是上一局的分数，随后才被 startGame() 重置为 0 ——
-        // 玩家看到分数从旧值跳到 0。
+        // ViewModel 活得比 GameScreen 长，成绩入库后 board / score / combo
+        // 留在 state 里没有任何用途，但会造成可见的 bug —— 下次从菜单进
+        // 游戏时，首帧渲染的是**上一局的现场**：分数从旧值跳到 0、棋盘明显
+        // 刷一下（startGame() 下一帧才覆盖）。
         //
-        // 在这里清零让「离开对局」这件事一次做完，而不是留给下一局的开头
-        // 去擦。startGame() 里的重置因此变成幂等操作，不再承担纠正职责。
+        // 清理清单在 RoundTeardown.teardown 里，与挂起路径
+        // （onStopWithSnapshot）共用一份 —— 这个 bug 分三次才修完
+        // （先补分数、再补棋盘、又补 animFrame），因为清单曾经散在两处
+        // 靠人记全。现在它是 engine 的纯函数，有 6 条测试锁住。
         //
         // phase 同时变成 IDLE，结算面板随之消失，所以清零不会让面板上的
         // 成绩闪一下再没 —— 两者在同一帧生效。
-        _state.update {
-            it.copy(
-                phase = GamePhase.IDLE,
-                score = 0,
-                combo = 0,
-                isNewRecord = false,
-            )
-        }
+        _state.update { RoundTeardown.teardown(it) }
 
         if (!hadUnsettledScore) {
             // 没有实际写盘动作，直接回调。
@@ -627,24 +623,17 @@ class GameViewModel(
             roundSuspendedToMenu = false
         }
 
-        // 置 IDLE 并清掉本局现场：离开游戏屏后 phase 不该停在 PAUSED，
-        // 否则下次进游戏屏会先闪一下暂停面板。
+        // 置 IDLE 并清掉本局现场。清理清单与 onQuit 共用
+        // RoundTeardown.teardown（engine 纯函数，6 条测试锁住）。
         //
-        // ⚠️ 分数也要清，且**不影响恢复** —— 现场已经存进快照了
-        // （上面的 saveBlocking），恢复靠的是 restoreSnapshot 读盘，
-        // 不是 state 里的残留值。
+        // 离开游戏屏后 phase 不该停在 PAUSED，否则下次进游戏屏会先闪一下
+        // 暂停面板。棋盘/分数也要清，否则从菜单点「开始新游戏」时首帧是
+        // 上一局的现场。
         //
-        // 不清的后果：玩家保留进度回菜单，再点「开始新游戏」（而不是
-        // 「继续上局」），首帧会读到上一局的分数，随后被 startGame()
-        // 重置为 0 —— 又是一次跳变。与 onQuit 里同一个问题。
-        _state.update {
-            it.copy(
-                phase = GamePhase.IDLE,
-                score = 0,
-                combo = 0,
-                isNewRecord = false,
-            )
-        }
+        // ⚠️ 清空**不影响恢复**：现场已经 saveBlocking 存盘了（就在上面
+        // 几行），restoreSnapshot 是读盘重建 GameState，不依赖 state 里的
+        // 残留值。
+        _state.update { RoundTeardown.teardown(it) }
         onSuspended()
     }
 
