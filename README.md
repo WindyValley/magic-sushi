@@ -100,7 +100,7 @@ magic-sushi/
 │   ├── engine/                    # 纯 Kotlin 模块（无 Android 依赖）
 │   │   └── src/
 │   │       ├── main/kotlin/.../engine/   # 23 个核心文件
-│   │       └── test/kotlin/.../engine/   # 28 个测试文件 / 309 用例
+│   │       └── test/kotlin/.../engine/   # 28 个测试文件 / 231 用例
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
 └── references/
