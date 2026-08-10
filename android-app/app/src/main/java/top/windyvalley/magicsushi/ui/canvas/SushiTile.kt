@@ -1,7 +1,7 @@
 package top.windyvalley.magicsushi.ui.canvas
 
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -250,56 +250,76 @@ fun SushiTile(
     //
     // ## 改法
     //
-    // 目标值永远是 0，下落起点用 snapTo 一次性置位：
+    // 目标值永远是 0，下落起点在组合期一次性置位：
     //
-    //   看到 Falling/SpawningIn（且 offset 非 0）→ snapTo(起点) 后 animateTo(0)
-    //   看到 Stable                              → 什么都不做
+    //   看到 Falling/SpawningIn（offset 非 0）→ 组合期置位到起点，动画到 0
+    //   看到 Stable                           → 直接落定，不播动画
     //
-    // frame 2 的 Stable 不再触发任何动画，第一段 animateTo 自然跑完。
     // key 用 tileId：换 tile 时重建动画状态，同一 tile 跨帧保持进行中的下落。
     //
-    // ## ⚠️ 初值必须是起点，不能是 0
+    // ## ⚠️ 起点必须在**组合期**置位，不能靠 LaunchedEffect
     //
-    // `Animatable(0f)` 会让新出现的 tile 先在**落点**画一帧，下一帧
-    // LaunchedEffect 才 snapTo 到起点 —— 视觉上就是「闪一下再落下来」。
+    // 这里有两条不同的时间线，只改「初值」只能救其中一条：
     //
-    // 新生成的 tile 尤其明显：engine 的 frame 1 对 spawn 格子是
-    // `continue`（什么都不画），所以它的生命周期是
+    //   新生成的 tile：首次进入组合时 target 已经非 0
+    //       → 初值就是起点，首帧正确
+    //         （engine 的 frame 1 对 spawn 格子是 continue，什么都不画，
+    //          所以它的生命周期是 frame1 不存在 → frame2 带 SpawningIn 出现）
     //
-    //   frame 1  不存在
-    //   frame 2  突然出现，带 SpawningIn
+    //   已在棋盘上的 tile：Stable 时状态就建好了（初值 0），之后 Falling
+    //   帧到来，target 变成 -落差，但 `remember(tileId)` **不会重建** ——
+    //   初值参数根本不再求值
+    //       → 这一帧仍然渲染 offset=0（落点），下一帧副作用才置位。
+    //         中间那一帧就是「闪」
     //
-    // 首次进入组合就带着 SpawningIn，若初值取 0 就正好在落点闪一帧。
-    // 用 cascadeOffsetYTarget 作初值，首帧即在起点，不需要靠副作用补救。
+    // 只改初值时，新 tile 不闪了但已有 tile 还闪，就是因为第二条时间线
+    // 没被覆盖。置位必须发生在**组合期**（本帧渲染之前）。
     //
-    // 这和 ScoreOverlay 当初的 `remember { Animatable(currentScore) }` 是
-    // 同一类陷阱：remember 的 lambda 只在首次组合求值，任何"稍后再修正"
-    // 的写法都会先渲染一帧错的。
-    val cascadeAnim = remember(tileId) { Animatable(cascadeOffsetYTarget) }
+    // 这也是为什么这里不用 Animatable：它的 `snapTo` 是 suspend 函数
+    // （javap 确认签名带 Continuation），只能在协程里调，天生晚一帧。
+    // 改用普通 Float state 自己驱动动画 —— 置位就是一次同步赋值。
+    //
+    // 同类陷阱见 ScoreOverlay 的 `remember { Animatable(currentScore) }`：
+    // remember 的 lambda 只在首次组合求值，任何"稍后再修正"的写法都会
+    // 先渲染一帧错的。
+    var cascadeOffset by remember(tileId) { mutableStateOf(cascadeOffsetYTarget) }
+
+    // 上一次已置位的 target。用它判断「target 变了」，避免每次重组都重置
+    // 位移（那会让进行中的动画永远停在起点）。
+    var lastTarget by remember(tileId) { mutableStateOf(cascadeOffsetYTarget) }
+
+    // 组合期同步置位：target 变了就立刻把 tile 放到新起点。
+    //
+    // 写 snapshot state 在组合期是允许的（它就是 remember 的值），关键是
+    // 这一句在返回 UI 之前执行，所以**本帧**渲染用的就是起点值，不会先
+    // 画一帧落点。
+    if (cascadeOffsetYTarget != lastTarget) {
+        cascadeOffset = cascadeOffsetYTarget
+        lastTarget = cascadeOffsetYTarget
+    }
+
+    // 动画：从当前 cascadeOffset 跑到 0。
+    //
+    // 用 animate(...) 的手工循环而不是 animateFloatAsState，原因见上面
+    // 「为什么 animateFloatAsState 会导致落地后弹回去」：target 恒为 0，
+    // 起点由上面的组合期赋值决定，动画只负责把它推向 0。
     LaunchedEffect(tileId, cascadeOffsetYTarget) {
-        if (cascadeOffsetYTarget != 0f) {
-            // 一次下落 = 瞬间回到起点 + 动画落到位。
-            //
-            // snapTo 对「首次组合」是幂等的（初值已经是起点），它真正的
-            // 作用是同一个 tile 在连消中被复用时重置起点。
-            cascadeAnim.snapTo(cascadeOffsetYTarget)
-            cascadeAnim.animateTo(
-                targetValue = 0f,
-                animationSpec = tween(durationMillis = CASCADE_ANIM_MS, easing = FallEasing),
-            )
-        } else if (cascadeAnim.value != 0f) {
-            // ⚠️ 这个分支是必需的，不能只写 `if (target != 0f)`。
-            //
-            // Stable 帧到来时 LaunchedEffect 会重启，进行中的 animateTo 被
-            // **取消**。若这里什么都不做，tile 就停在半空 —— 比回弹更糟。
-            //
-            // 用 snapTo 而非 animateTo 收尾：此刻 tile 视觉上已接近落点
-            // （动画跑了将近一个相位），再补一段动画反而是第二次运动，
-            // 又变成回弹。直接置位，肉眼看到的就是「落到位了」。
-            cascadeAnim.snapTo(0f)
+        if (cascadeOffsetYTarget == 0f) {
+            // Stable / FadingOut：确保落定，不播动画。
+            cascadeOffset = 0f
+            return@LaunchedEffect
+        }
+        val from = cascadeOffsetYTarget
+        val spec = tween<Float>(durationMillis = CASCADE_ANIM_MS, easing = FallEasing)
+        animate(
+            initialValue = from,
+            targetValue = 0f,
+            animationSpec = spec,
+        ) { value, _ ->
+            cascadeOffset = value
         }
     }
-    val animOffsetY = cascadeAnim.value
+    val animOffsetY = cascadeOffset
 
     // Live drag offset (in pixels). Reset to Zero in onDragEnd / onDragCancel
     // so the animateFloatAsState tween smoothly snaps the tile back.
