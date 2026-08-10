@@ -1,5 +1,6 @@
 package top.windyvalley.magicsushi.ui.canvas
 
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -61,6 +62,20 @@ private const val ANIM_DURATION_MS = 150
 /** Duration (ms) of tile cascade animations (fade / fall / spawn). */
 private const val CASCADE_ANIM_MS = 100
 
+/**
+ * 下落用的加速曲线（重力感）。
+ *
+ * tween 的默认 easing 是 FastOutSlowInEasing —— 两头慢、中间快，尾部会
+ * **减速**。用它做下落，tile 接近落点时会缓一下，看着像飘下来而不是掉下来。
+ *
+ * 这条三次贝塞尔 (0.33, 0, 0.67, 0.2) 是「起步慢、越落越快、到底才停」的
+ * 形状，控制点的 y 全程低于 x，意味着整段位移的速度单调上升，符合自由落体。
+ *
+ * 只用于 Falling / SpawningIn 的 Y 位移。淡出（alpha）仍用默认曲线 ——
+ * 消失是视觉过渡，不是物理运动，加速反而显得突兀。
+ */
+private val FallEasing = CubicBezierEasing(0.33f, 0f, 0.67f, 0.2f)
+
 // ============================================================================
 // Public API
 // ============================================================================
@@ -82,13 +97,24 @@ private const val CASCADE_ANIM_MS = 100
  *   [tileAnim] drives per-phase tile animation:
  *   - `FadingOut` → alpha lerps 1 → 0 over [CASCADE_ANIM_MS] ms.
  *   - `Falling(fromRow, toRow)` → offsetY lerps
- *     `(fromRow - toRow) * cellSizePx` → 0 over [CASCADE_ANIM_MS] ms.
+ *     `(fromRow - toRow) * cellSizePx` → 0 over [CASCADE_ANIM_MS] ms,
+ *     eased by [FallEasing] (accelerating — see below).
  *   - `SpawningIn(spawnFromRow)` → offsetY lerps
- *     `spawnFromRow * cellSizePx` → 0 over [CASCADE_ANIM_MS] ms.
+ *     `spawnFromRow * cellSizePx` → 0 over [CASCADE_ANIM_MS] ms,
+ *     same easing as `Falling`.
  *   - `Stable` / null → no cascade animation.
  *
  * The drag offset resets to zero after each drag, so the tile snaps back to
  * its layout position via `animateFloatAsState` ([ANIM_DURATION_MS] ms).
+ *
+ * ## 下落位移不再经过第二级 tween
+ *
+ * 拖拽位移和级联下落位移是**两条独立的路径**，只有前者走
+ * [ANIM_DURATION_MS] 的 tween，两者在最后相加。
+ *
+ * 曾经的写法是 `targetValue = dragOffset.y + animOffsetY`，把已经是 tween
+ * 输出的 `animOffsetY` 又喂给另一个 tween —— 两级串联产生二阶滞后，tile
+ * 落到位后会被拉回一下，看起来在「跳动」。详见 `animatedOffsetY` 处的注释。
  *
  * Implementation notes:
  *   - `pointerInput(type)` is keyed by [type] so that gesture state is
@@ -184,7 +210,7 @@ fun SushiTile(
     }
     val animOffsetY by animateFloatAsState(
         targetValue = cascadeOffsetYTarget,
-        animationSpec = tween(durationMillis = CASCADE_ANIM_MS),
+        animationSpec = tween(durationMillis = CASCADE_ANIM_MS, easing = FallEasing),
         label = "sushiTile.cascadeOffsetY",
     )
 
@@ -199,11 +225,28 @@ fun SushiTile(
         animationSpec = tween(durationMillis = ANIM_DURATION_MS),
         label = "sushiTile.offsetX",
     )
-    val animatedOffsetY by animateFloatAsState(
-        targetValue = dragOffset.y + animOffsetY,
+    // ⚠️ 只有**拖拽**位移走这个 tween，级联下落位移（animOffsetY）不经过它。
+    //
+    // ## 为什么不能把两者相加再一起 tween
+    //
+    // animOffsetY 本身已经是一个 tween 的输出（上面的 cascadeOffsetY，
+    // CASCADE_ANIM_MS）。把它当作另一个 animateFloatAsState 的 targetValue，
+    // 等于把「动画的当前值」作为「另一个动画的目标」—— 两级 tween 串联，
+    // 产生二阶滞后：
+    //
+    //   第一级已经到 0（tile 到位）
+    //   第二级还在追前一刻那个非 0 的值 → 冲过静止位再被拉回
+    //
+    // 视觉上就是被消除区域上方的 tile 落到位后弹一下，也就是用户说的
+    // 「跳动」。两个时长不同（100ms vs 150ms）会让这个回弹更明显。
+    //
+    // 下落的插值已经由 cascadeOffsetY 那级负责，这里直接叠加即可。
+    val animatedDragOffsetY by animateFloatAsState(
+        targetValue = dragOffset.y,
         animationSpec = tween(durationMillis = ANIM_DURATION_MS),
-        label = "sushiTile.offsetY",
+        label = "sushiTile.dragOffsetY",
     )
+    val animatedOffsetY = animatedDragOffsetY + animOffsetY
 
     val bitmap = imageBitmap
     if (bitmap != null) {
