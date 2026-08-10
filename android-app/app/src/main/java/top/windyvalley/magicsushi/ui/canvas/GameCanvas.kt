@@ -209,6 +209,8 @@ fun GameCanvas(
                     col = cellKey.col,
                     type = renderState.type,
                     tileAnim = renderState.anim,
+                    // 直接用 engine 算好的偏移，不在这里从 tileAnim 反推。
+                    offsetYCells = renderState.offsetY,
                 )
             }
             // 无动画：直接读棋盘，身份同样是 tile.id。
@@ -223,6 +225,7 @@ fun GameCanvas(
                                 col = col,
                                 type = tile.type,
                                 tileAnim = null,
+                                offsetYCells = 0f,
                             )
                         )
                     }
@@ -244,6 +247,7 @@ fun GameCanvas(
                     isSelected = isSelected,
                     isDragging = isDragging,
                     tileAnim = slot.tileAnim,
+                    offsetYCells = slot.offsetYCells,
                     onClick = { onTileTap(row, col) },
                     onDragStart = { draggingTile = row to col },
                     onDragEnd = { _, toOffset, cs ->
@@ -299,4 +303,21 @@ private data class TileSlot(
     val col: Int,
     val type: SushiType,
     val tileAnim: AnimationEngine.TileAnim?,
+    /**
+     * 下落距离，单位是**格数**，由 engine 算好。
+     *
+     * 语义沿用 engine 的领域约定：**正值 = 这个 tile 往下落了几格**。
+     * Stable 态（无动画）时为 0f。
+     *
+     * ⚠️ 这不是 Compose 的 y 位移 —— Compose 里 y 向下为正，而动画起点在
+     * 落点上方，所以消费时要取负。转换在 `SushiTile` 内部完成，这里保持
+     * engine 口径不变。
+     *
+     * ⚠️ 必须用 engine 的 `TileRenderState.offsetY`，不要在 UI 侧从
+     * `TileAnim` 重新推导 —— 那会变成同一个公式的两份实现。曾经的 bug：
+     * UI 对 `SpawningIn(spawnFromRow)` 算的是 `spawnFromRow`，而正确的
+     * 落差是 `row - spawnFromRow`。row=2、spawnFromRow=-3 的顶部空洞，
+     * 实际要落 5 格，UI 只让它落了 3 格 —— 起点还在棋盘内。
+     */
+    val offsetYCells: Float,
 )

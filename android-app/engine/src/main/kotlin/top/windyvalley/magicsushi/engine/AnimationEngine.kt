@@ -236,7 +236,14 @@ object AnimationEngine {
                     val origRow = preFallRow[tile.id]
                     if (origRow != null && origRow != row) {
                         // Tile fell from a different row.
-                        // offsetY > 0 means fell DOWN (positive y offset moves composable down).
+                        //
+                        // offsetY 的符号约定：**正值 = 这个 tile 往下落了几格**。
+                        // 这是 engine 的领域语义（"落了多少"），由
+                        // `Falling offsetY must be positive` 等测试钉住。
+                        //
+                        // ⚠️ 它不是 Compose 的 y 位移。Compose 里 y 向下为正，
+                        // 而动画起点在落点**上方**，所以 UI 消费这个值时必须
+                        // 取负 —— 转换发生在 SushiTile，见那里的注释。
                         val offsetY = (row - origRow).toFloat()
                         put(
                             CellKey(row, col),
@@ -357,6 +364,16 @@ object AnimationEngine {
                             tileId = spawned.id,
                             type = spawned.type,
                             alpha = 1f,
+                            // 符号约定同 Falling：**正值 = 往下落了几格**。
+                            // spawnFromRow 是负的行号（-1, -2, -3… = 棋盘外
+                            // 上方第 N 行），落到 row，所以落差 = row - spawnFromRow，
+                            // 恒为正。由 `frame2 spawn-in tiles have positive
+                            // offsetY` 钉住。
+                            //
+                            //   row=0, spawnFromRow=-1 → +1（落 1 格）
+                            //   row=2, spawnFromRow=-3 → +5（落 5 格）
+                            //
+                            // ⚠️ UI 消费时取负，转换在 SushiTile。
                             offsetY = (row - spawnFromRow).toFloat(),
                             scale = 1f,
                             anim = TileAnim.SpawningIn(spawnFromRow),

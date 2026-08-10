@@ -1,5 +1,6 @@
 package top.windyvalley.magicsushi.ui.canvas
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -9,6 +10,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -96,13 +98,14 @@ private val FallEasing = CubicBezierEasing(0.33f, 0f, 0.67f, 0.2f)
  * Cascade animation (T-ANIM-001):
  *   [tileAnim] drives per-phase tile animation:
  *   - `FadingOut` → alpha lerps 1 → 0 over [CASCADE_ANIM_MS] ms.
- *   - `Falling(fromRow, toRow)` → offsetY lerps
- *     `(fromRow - toRow) * cellSizePx` → 0 over [CASCADE_ANIM_MS] ms,
- *     eased by [FallEasing] (accelerating — see below).
- *   - `SpawningIn(spawnFromRow)` → offsetY lerps
- *     `spawnFromRow * cellSizePx` → 0 over [CASCADE_ANIM_MS] ms,
- *     same easing as `Falling`.
+ *   - `Falling(fromRow, toRow)` → 起始位移 = `-engineOffsetY * cellSizePx`
+ *     （在落点上方），动画到 0，eased by [FallEasing]（加速）。
+ *   - `SpawningIn(spawnFromRow)` → 同上，起点在棋盘外上方。
  *   - `Stable` / null → no cascade animation.
+ *
+ * 位移量由 engine 的 `TileRenderState.offsetY` 给出（经 [offsetYCells] 传入），
+ * **不在这里从 [tileAnim] 反推** —— 详见 `cascadeOffsetYTarget` 处关于两套
+ * 符号约定的说明。
  *
  * The drag offset resets to zero after each drag, so the tile snaps back to
  * its layout position via `animateFloatAsState` ([ANIM_DURATION_MS] ms).
@@ -112,9 +115,9 @@ private val FallEasing = CubicBezierEasing(0.33f, 0f, 0.67f, 0.2f)
  * 拖拽位移和级联下落位移是**两条独立的路径**，只有前者走
  * [ANIM_DURATION_MS] 的 tween，两者在最后相加。
  *
- * 曾经的写法是 `targetValue = dragOffset.y + animOffsetY`，把已经是 tween
- * 输出的 `animOffsetY` 又喂给另一个 tween —— 两级串联产生二阶滞后，tile
- * 落到位后会被拉回一下，看起来在「跳动」。详见 `animatedOffsetY` 处的注释。
+ * 曾经的写法是 `targetValue = dragOffset.y + animOffsetY`，把已经是动画
+ * 输出的 `animOffsetY` 又喂给一个 tween —— 两级串联产生二阶滞后，tile
+ * 落到位后会被拉回一下，看起来在「跳动」。详见 `cascadeAnim` 处的注释。
  *
  * Implementation notes:
  *   - `pointerInput(type)` is keyed by [type] so that gesture state is
@@ -154,6 +157,7 @@ fun SushiTile(
     isSelected: Boolean,
     isDragging: Boolean,
     tileAnim: AnimationEngine.TileAnim? = null,
+    offsetYCells: Float = 0f,
     modifier: Modifier = Modifier,
     onClick: () -> Unit = {},
     onDragStart: () -> Unit = {},
@@ -198,21 +202,83 @@ fun SushiTile(
     )
     val alpha = baseAlpha * animAlpha
 
-    // Cascade Y offset: Falling / SpawningIn → animate to 0 (rest position).
-    // Fall: offset = (fromRow - toRow) * cellSizePx (positive = fell DOWN).
-    // Spawn: offset = spawnFromRow * cellSizePx (negative = above board).
-    val cascadeOffsetYTarget: Float = when (tileAnim) {
-        is AnimationEngine.TileAnim.Falling ->
-            (tileAnim.fromRow - tileAnim.toRow).toFloat() * cellSizePx
-        is AnimationEngine.TileAnim.SpawningIn ->
-            tileAnim.spawnFromRow.toFloat() * cellSizePx
-        else -> 0f
+    // Cascade Y offset: 起点由 engine 给出（offsetYCells，单位格数）。
+    //
+    // ## 两套符号约定，这里是唯一的转换点
+    //
+    // engine 的 offsetY 是**领域语义**：「这个 tile 往下落了几格」，正值。
+    // 由 `Falling offsetY must be positive` 等测试钉住。
+    //
+    // Compose 的 y 轴**向下为正**，而 tile 已经渲染在落点上，动画起点在
+    // 落点**上方** —— 上方是更小的 y。所以起始位移 = **负**的落差：
+    //
+    //   engine: 往下落了 3 格  (+3)
+    //   Compose: 起点在上方 3 格 (-3)，动画到 0 就是落下来
+    //
+    // 取负只在这一处发生。engine 不改（领域语义是对的），UI 不再自己
+    // 从 tileAnim 反推距离（那会变成同一公式的两份实现）。
+    //
+    // ⚠️ 曾经 UI 侧自己算，两个分支的口径还不一致：
+    //   Falling(fromRow, toRow)   算 fromRow - toRow      = -落差  ✓ 恰好等价于取负
+    //   SpawningIn(spawnFromRow)  算 spawnFromRow          ✗ 距离错了
+    //
+    // 后者是这次的 bug：row=2、spawnFromRow=-3 的顶部空洞，实际要落
+    // 5 格（从棋盘外第 3 行落到第 2 行），UI 只让它落了 3 格 ——
+    // 新生成的 tile 一直落得比应有距离短，起点还在棋盘内。
+    val cascadeOffsetYTarget: Float = -offsetYCells * cellSizePx
+
+    // ⚠️ 用 Animatable 手工控制，不能用 animateFloatAsState。原因见下。
+    //
+    // ## 为什么 animateFloatAsState 会导致「落地后弹回去」
+    //
+    // engine 每轮产出 3 帧，同一个 tile 的 anim 依次是：
+    //
+    //   frame 1  Falling(origRow, row)   起始位移 = -落差（在落点上方）
+    //   frame 2  Stable                  起始位移 = 0
+    //
+    // 注意 tile 在 frame 1 就已经渲染在**目标行**了，位移的作用是把它
+    // 「往上推」到起点，动画到 0 的过程才是视觉上的下落。
+    //
+    // 但相位间隔（ANIM_PHASE_MS = 100ms）与动画时长（CASCADE_ANIM_MS = 100ms）
+    // 相等，frame 2 到达时第一段动画往往还没跑完。此时 animateFloatAsState
+    // 看到 targetValue 从 -落差 突变为 0，会**从当前值重新起跑一段新动画** ——
+    // 而当前值是个中间量，于是 tile 先往上跳回一点再落下。那就是回弹。
+    //
+    // 根因不是 easing、不是时长、也不是新生成 tile 被重复计算：是「用
+    // targetValue 表达一次性冲量」这件事本身不成立 —— 声明式动画只知道
+    // 「目标变了」，不知道「这是同一次下落的延续」。
+    //
+    // ## 改法
+    //
+    // 目标值永远是 0，下落起点用 snapTo 一次性置位：
+    //
+    //   看到 Falling/SpawningIn（且 offset 非 0）→ snapTo(起点) 后 animateTo(0)
+    //   看到 Stable                              → 什么都不做
+    //
+    // frame 2 的 Stable 不再触发任何动画，第一段 animateTo 自然跑完。
+    // key 用 tileId：换 tile 时重建动画状态，同一 tile 跨帧保持进行中的下落。
+    val cascadeAnim = remember(tileId) { Animatable(0f) }
+    LaunchedEffect(tileId, cascadeOffsetYTarget) {
+        if (cascadeOffsetYTarget != 0f) {
+            // 一次下落 = 瞬间回到起点 + 动画落到位。
+            cascadeAnim.snapTo(cascadeOffsetYTarget)
+            cascadeAnim.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(durationMillis = CASCADE_ANIM_MS, easing = FallEasing),
+            )
+        } else if (cascadeAnim.value != 0f) {
+            // ⚠️ 这个分支是必需的，不能只写 `if (target != 0f)`。
+            //
+            // Stable 帧到来时 LaunchedEffect 会重启，进行中的 animateTo 被
+            // **取消**。若这里什么都不做，tile 就停在半空 —— 比回弹更糟。
+            //
+            // 用 snapTo 而非 animateTo 收尾：此刻 tile 视觉上已接近落点
+            // （动画跑了将近一个相位），再补一段动画反而是第二次运动，
+            // 又变成回弹。直接置位，肉眼看到的就是「落到位了」。
+            cascadeAnim.snapTo(0f)
+        }
     }
-    val animOffsetY by animateFloatAsState(
-        targetValue = cascadeOffsetYTarget,
-        animationSpec = tween(durationMillis = CASCADE_ANIM_MS, easing = FallEasing),
-        label = "sushiTile.cascadeOffsetY",
-    )
+    val animOffsetY = cascadeAnim.value
 
     // Live drag offset (in pixels). Reset to Zero in onDragEnd / onDragCancel
     // so the animateFloatAsState tween smoothly snaps the tile back.
