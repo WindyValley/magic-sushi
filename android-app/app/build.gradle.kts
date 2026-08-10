@@ -14,8 +14,25 @@ android {
         applicationId = "top.windyvalley.magicsushi"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        // 版本号遵循 SemVer（https://semver.org/lang/zh-CN/）。
+        //
+        // versionName = MAJOR.MINOR.PATCH
+        //   MAJOR  破坏性变更 / 存档不兼容。0 表示还在初始开发阶段，
+        //          公开 API 与存档格式都不保证稳定。
+        //   MINOR  新增功能（向后兼容）
+        //   PATCH  仅修 bug
+        //
+        // versionCode 是 Android 用来判断"哪个包更新"的整数，与 SemVer 无关，
+        // 只需**单调递增**。这里按发布次数计数：
+        //   1 → v0.1.0    2 → v0.1.1    3 → v0.2.0（本次）
+        //
+        // ⚠️ 改这里就够了：设置页的版本号走 BuildConfig.VERSION_NAME
+        // （MainActivity 传给 SettingsScreen），不存在第二处需要同步的常量。
+        //
+        // 本次为什么是 MINOR bump 而不是 PATCH：v0.1.1 之后新增了设置页面
+        // （静音开关首次有 UI 入口、清空历史记录、关于），属于新功能。
+        versionCode = 3
+        versionName = "0.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
