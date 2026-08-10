@@ -19,6 +19,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.Lifecycle
+import top.windyvalley.magicsushi.engine.GamePhase
 import top.windyvalley.magicsushi.ui.navigation.AppScreen
 import top.windyvalley.magicsushi.ui.navigation.AppScreenSaver
 import top.windyvalley.magicsushi.ui.screen.GameScreen
@@ -241,7 +242,28 @@ private fun AppRoot(
 
             // 游戏中按返回键 = 暂停，而不是直接退出。
             // 玩家在玩的时候误触返回键丢掉一局是很糟的体验。
-            BackHandler { viewModel.onPause() }
+            //
+            // ⚠️ 结算面板（GAME_OVER）下不能仍走 onPause()：
+            //
+            // GameOverDialog 设了 dismissOnBackPress = false，所以返回键会
+            // 穿透到这个 BackHandler。而 onPause() 现在对 GAME_OVER 是
+            // no-op（见 PauseRules），返回键就变成**完全没反应** —— 玩家在
+            // 结算面板上按返回键，界面纹丝不动，看起来像卡死了。
+            //
+            // 改前更糟：无条件 onPause() 会把结算面板换成暂停面板，那一局
+            // 已经结束了却出现"暂停"。
+            //
+            // 这局已经结算过（onGameOver 里已入库），所以直接回菜单即可 ——
+            // 与结算面板上的「返回菜单」按钮同义。走 onQuit 而不是直接改
+            // screen，是为了复用它的收尾（清快照、置 IDLE）；成绩有幂等
+            // 保护，不会重复入库。
+            BackHandler {
+                if (viewModel.state.value.phase == GamePhase.GAME_OVER) {
+                    viewModel.onQuit(onRecorded = { screen = AppScreen.Menu })
+                } else {
+                    viewModel.onPause()
+                }
+            }
 
             GameScreen(
                 viewModel = viewModel,

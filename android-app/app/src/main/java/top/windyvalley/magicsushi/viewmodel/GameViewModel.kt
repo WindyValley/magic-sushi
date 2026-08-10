@@ -31,6 +31,7 @@ import top.windyvalley.magicsushi.engine.RoundSettlement
 import top.windyvalley.magicsushi.engine.GamePhase
 import top.windyvalley.magicsushi.engine.GameState
 import top.windyvalley.magicsushi.engine.MatchEngine
+import top.windyvalley.magicsushi.engine.PauseRules
 import top.windyvalley.magicsushi.engine.ScoreEngine
 import top.windyvalley.magicsushi.engine.SwapResult
 import top.windyvalley.magicsushi.engine.TimerEngine
@@ -617,8 +618,11 @@ class GameViewModel(
      * [onResume] will pick up where we left off — board state, score,
      * combo, and remaining time are all preserved.
      *
-     * Safe to call from any phase — it just sets the flag and cancels the
-     * job. (If the timer wasn't running, the cancel is a no-op.)
+     * Safe to call from any phase — but it only *acts* on
+     * [GamePhase.PLAYING]. Any other phase is a no-op (see [PauseRules]):
+     * a finished round must stay on the game-over dialog, and a round
+     * suspended back to the menu must keep its `IDLE` phase.
+     * (If the timer wasn't running, the cancel is a no-op.)
      *
      * ## 为什么不 cancel swapJob
      *
@@ -637,6 +641,19 @@ class GameViewModel(
      * 于是 phase 一个字段同时驱动三件事：倒计时停、动画挂起、手势拦截。
      */
     fun onPause() {
+        // ⚠️ 有条件暂停。曾经这里是无条件 `_state.update { copy(PAUSED) }`，
+        // 而调用来源（ON_PAUSE / ON_STOP）与「对局是否在进行」完全无关：
+        //
+        //   1. 玩家在**结算面板**上切后台再回来 → 看到暂停面板。那一局已经
+        //      结束了，"暂停"没有意义；又因为回到前台不自动继续（见
+        //      onSystemResume），他会卡在一个点「继续」才能离开的面板上。
+        //   2. 玩家停在**菜单**时切后台 → IDLE 被改成 PAUSED，而
+        //      onStopWithSnapshot 正靠 phase 区分「挂起回菜单」该不该保住
+        //      快照，状态被抹掉后判断就失准。
+        //
+        // 准入规则抽到 engine 的 PauseRules（纯函数 + 逐状态测试覆盖）。
+        if (!PauseRules.shouldPause(_state.value.phase)) return
+
         _state.update { it.copy(phase = GamePhase.PAUSED) }
         timerJob?.cancel()
     }
@@ -678,6 +695,14 @@ class GameViewModel(
         //
         // isRestorable 挡掉空棋盘和已耗尽的计时器；currentRoundRecorded
         // 挡掉「已经算过成绩」的局（game over 后停在结算弹窗、或已退出）。
+        //
+        // ⚠️ 这两个 phase 条件曾是**死代码**：上面的 onPause() 当时无条件
+        // 把 phase 改成 PAUSED，等到这里读 _state.value 时必然是 PAUSED，
+        // 于是 `!= IDLE && != GAME_OVER` 恒为真，它们想挡的状态在读之前
+        // 就被覆盖了。真正在把关的只有 currentRoundRecorded 和 isRestorable。
+        //
+        // onPause() 改为有条件之后（见 PauseRules），phase 能如实传到这里，
+        // 这两个条件才真正生效。
         val worthSaving = !currentRoundRecorded &&
             s.phase != GamePhase.IDLE &&
             s.phase != GamePhase.GAME_OVER &&
