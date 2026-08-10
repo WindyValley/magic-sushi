@@ -19,12 +19,12 @@ class HighScoreRulesTest {
 
     @Test
     fun isNewRecord_higherScoreWins() {
-        assertTrue(HighScoreRules.isNewRecord(newScore = 100, savedHighScore = 50))
+        assertTrue(HighScoreRules.isNewRecord(candidate = 100, currentHigh = 50))
     }
 
     @Test
     fun isNewRecord_lowerScoreRejected() {
-        assertFalse(HighScoreRules.isNewRecord(newScore = 30, savedHighScore = 50))
+        assertFalse(HighScoreRules.isNewRecord(candidate = 30, currentHigh = 50))
     }
 
     /**
@@ -33,19 +33,32 @@ class HighScoreRulesTest {
      */
     @Test
     fun isNewRecord_equalScoreIsNotNewRecord() {
-        assertFalse(HighScoreRules.isNewRecord(newScore = 50, savedHighScore = 50))
+        assertFalse(HighScoreRules.isNewRecord(candidate = 50, currentHigh = 50))
     }
 
     @Test
     fun isNewRecord_firstEverScoreOnFreshInstall() {
         // 全新安装：最高分 0，得 1 分也算破纪录
-        assertTrue(HighScoreRules.isNewRecord(newScore = 1, savedHighScore = 0))
+        assertTrue(HighScoreRules.isNewRecord(candidate = 1, currentHigh = 0))
     }
 
     @Test
     fun isNewRecord_zeroScoreOnFreshInstallIsNot() {
         // 0 分不该被记成纪录
-        assertFalse(HighScoreRules.isNewRecord(newScore = 0, savedHighScore = 0))
+        assertFalse(HighScoreRules.isNewRecord(candidate = 0, currentHigh = 0))
+    }
+
+    /**
+     * 负分不算纪录。
+     *
+     * 正分检查现在**内置**在 isNewRecord 里（曾经由每个调用方自己补
+     * `score > 0 &&`），所以这条边界归它自己守。
+     */
+    @Test
+    fun isNewRecord_negativeScoreIsNot() {
+        assertFalse(HighScoreRules.isNewRecord(candidate = -10, currentHigh = 0))
+        // 即使"大于"一个更负的基准，也不算 —— 正分是硬条件。
+        assertFalse(HighScoreRules.isNewRecord(candidate = -10, currentHigh = -50))
     }
 
     // ========================================================================

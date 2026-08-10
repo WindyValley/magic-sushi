@@ -140,16 +140,19 @@ class RoundSettlementTest {
     /**
      * 结算判定必须与 [HighScoreRules.isNewRecord] 完全一致。
      *
-     * 「破纪录」这个概念在项目里只能有一份定义 —— 它同时被最高分持久化、
-     * 庆祝动画、历史记录标记三处消费，分叉过一次就会出现「弹窗说破纪录但
-     * 最高分没变」这类自相矛盾的表现。
+     * 「破纪录」这个概念在项目里只有一份定义 —— 它同时被庆祝动画、历史记录
+     * 标记、最高分派生三处消费，分叉过一次就会出现「弹窗说破纪录但最高分没
+     * 变」这类自相矛盾的表现。
+     *
+     * ⚠️ `score > 0 &&` 不需要再加：`isNewRecord` 已内置正分检查。
+     * 曾经每个调用方自己补一个 `score > 0 &&`，那是判据尚未归一的痕迹。
      */
     @Test
     fun `破纪录判定与 HighScoreRules 保持一致`() {
         val cases = listOf(0 to 0, 1 to 0, 300 to 300, 301 to 300, 100 to 800)
         for ((score, high) in cases) {
             val outcome = RoundSettlement.settle(score, high, alreadyRecorded = false)
-            val expected = score > 0 && HighScoreRules.isNewRecord(score, high)
+            val expected = HighScoreRules.isNewRecord(score, high)
             assertEquals(
                 "score=$score high=$high 的破纪录判定必须与 HighScoreRules 一致",
                 expected, outcome.isNewRecord,

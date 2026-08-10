@@ -62,11 +62,13 @@ object HighScoreDerivation {
     /**
      * 在 [records] 的基础上，[candidate] 分是否构成新纪录。
      *
-     * 语义与旧的 `HighScoreRules.isNewRecord` 一致（严格大于），只是基准从
-     * "存着的最高分"换成"历史里的最高分"。
+     * 判据本身**不在这里** —— 委托给 [HighScoreRules.isNewRecord]，本函数
+     * 只负责把"历史列表"翻译成它需要的"标量基准"。
      *
-     * 0 分和负分永远不算 —— 与 [RoundSettlement] 的 `score <= 0` 分支一致。
+     * 这样「破纪录」在整个项目里只有一份定义。曾经这里自己写了一遍
+     * `candidate > 0 && candidate > highScoreOf(records)`，与 HighScoreRules
+     * 各持一份判据 —— 那正是双份真相的形态，只是重复的是判据而非数据。
      */
     fun isNewRecord(candidate: Int, records: List<GameRecord>): Boolean =
-        candidate > 0 && candidate > highScoreOf(records)
+        HighScoreRules.isNewRecord(candidate, highScoreOf(records))
 }
