@@ -47,30 +47,35 @@ fun ScoreOverlay(
     highScore: Int,
     modifier: Modifier = Modifier
 ) {
-    // 分数滚动动画：只在**上升**时播，下降时直接跳到位。
+    // 分数滚动动画。
     //
-    // ## 为什么要区分方向
+    // ## 分数下降有两种，只有一种该播动画
     //
-    // 游戏进行中分数是单调递增的（唯一的加分点是 GameViewModel 里
-    // `score = it.score + totalScore`），所以分数**下降**只有一个来源：
-    // 新开一局把 state 重置回 0。
+    // 游戏进行中分数单调递增（唯一加分点是 GameViewModel 里
+    // `score = it.score + totalScore`），所以下降只来自「开新局」。
+    // 但开新局的两条路径，玩家的视线位置不同：
     //
-    // 那次 300ms 的回滚动画在玩家眼里是「上一局的成绩在倒数」—— 一个
-    // 已经结束的对局还在界面上动，语义是错的。真正该动的只有得分那一刻。
+    //   结算面板点「再来一局」  屏幕上正显示着本局成绩，归零动画是
+    //                          「成绩清空、新的一局开始」的反馈 → 要播
     //
-    // ## 为什么不用 animateIntAsState
+    //   主菜单进游戏            玩家刚从菜单过来，屏幕上不该有上一局的
+    //                          任何残留 → 首帧就该是 0，连跳变都不该有
     //
-    // 那个 API 只接受目标值，方向判断得靠它内部的上一帧状态，拿不到也
-    // 干预不了。换成 Animatable 后「上升播动画 / 下降直接跳」是一行显式
-    // 的 if，读代码的人不需要推断框架行为。
+    // 第二条路径由 GameViewModel.onQuit 负责：回菜单时就把 score 清零，
+    // 所以进游戏时首帧读到的已经是 0，这里不会看到下降。
+    //
+    // 于是这里剩下的下降**只有**「再来一局」那一种，正常播动画即可 ——
+    // 不需要在 UI 层区分来源。判据放在状态离开对局时，比放在动画里更早
+    // 也更稳。
+    //
+    // ## 为什么用 Animatable 而不是 animateIntAsState
+    //
+    // 初值需要显式控制。animateIntAsState 首次组合时直接取目标值，而这里
+    // 要的是「记住当前值，后续变化才动画」—— 语义一样但拿不到句柄，将来
+    // 若要再加方向判断也无处下手。
     val scoreAnim = remember { Animatable(currentScore, Int.VectorConverter) }
     LaunchedEffect(currentScore) {
-        if (currentScore < scoreAnim.value) {
-            // 重置（新开一局）：立刻归位，不播回滚动画。
-            scoreAnim.snapTo(currentScore)
-        } else {
-            scoreAnim.animateTo(currentScore, animationSpec = tween(durationMillis = 300))
-        }
+        scoreAnim.animateTo(currentScore, animationSpec = tween(durationMillis = 300))
     }
     val animatedScore = scoreAnim.value
     
