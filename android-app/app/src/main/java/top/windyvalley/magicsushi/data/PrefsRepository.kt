@@ -2,7 +2,6 @@ package top.windyvalley.magicsushi.data
 
 import android.content.Context
 import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.SharedPreferencesMigration
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -20,7 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 /**
- * 设置类持久化仓库（DataStore 实现，FIX_PLAN D8）。
+ * 设置类持久化仓库（DataStore 实现）。
  *
  * 存储：历史最高分、静音开关。
  *
@@ -83,25 +82,7 @@ import kotlinx.coroutines.runBlocking
  */
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(
     name = "magic_sushi_settings",
-    produceMigrations = { ctx ->
-        // 老玩家的最高分/静音存在 magic_sushi_prefs.xml 里。不迁移就等于
-        // 升级即清零 —— 对玩了很久的人是实打实的数据丢失。
-        //
-        // SharedPreferencesMigration 只在 DataStore 首次创建时跑一次，
-        // 迁完自动记账，不会重复执行。keysToMigrate 显式列出，避免把
-        // 无关的历史遗留键一并搬进来。
-        listOf(
-            SharedPreferencesMigration(
-                context = ctx,
-                sharedPreferencesName = LEGACY_PREFS_NAME,
-                keysToMigrate = setOf(LEGACY_KEY_MUTED),
-            )
-        )
-    }
 )
-
-private const val LEGACY_PREFS_NAME = "magic_sushi_prefs"
-private const val LEGACY_KEY_MUTED = "muted"
 
 class PrefsRepository(
     private val context: Context,
@@ -219,7 +200,6 @@ class PrefsRepository(
      * （`MagicSushiApp.onCreate`）。
      *
      * 这里的 `runBlocking` 是有意的、有界的一次性阻塞，详见类注释。
-     * 首次运行还会触发 `SharedPreferencesMigration` 搬运老数据。
      */
     fun warmUp() {
         if (_isReady) return
@@ -267,11 +247,10 @@ class PrefsRepository(
     }
 
     companion object {
-        // 键名与旧 SharedPreferences 保持一致，让 SharedPreferencesMigration
-        // 能原样搬过来（它按 key 字符串匹配）。改名就等于丢老数据。
+        // 键名一旦发布就不能改 —— 改名等于让已安装的用户丢掉这项设置。
         //
         // 最高分的键已移除：它不再单独持久化，改为从历史记录派生
         // （见 HighScoreDerivation）。
-        private val KEY_MUTED = booleanPreferencesKey(LEGACY_KEY_MUTED)
+        private val KEY_MUTED = booleanPreferencesKey("muted")
     }
 }

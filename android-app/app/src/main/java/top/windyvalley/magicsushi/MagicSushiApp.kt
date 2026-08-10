@@ -12,7 +12,7 @@ import top.windyvalley.magicsushi.data.SnapshotRepository
 /**
  * MagicSushiApp — Application 类，同时充当极简的依赖容器。
  *
- * ## 为什么依赖放在这里而不是 Activity（FIX_PLAN P0-2）
+ * ## 为什么依赖放在这里而不是 Activity
  *
  * [SoundPlayer] 与 [PrefsRepository] 此前是 `MainActivity` 的
  * `by lazy` 属性，而 `GameViewModel` **跨配置变更存活**（`by viewModels()`）。
@@ -59,7 +59,7 @@ class MagicSushiApp : Application() {
      *
      * 与 [prefsRepo] 分开是按**数据性质**划分，不再是存储机制的差异：
      * 这个存最多 50 条对局记录，那个存设置类标量。两者现在都是 DataStore
-     * （FIX_PLAN D8 完成后不再有 SharedPreferences）。
+     * （完成后不再有 SharedPreferences）。
      */
     val historyRepo: HistoryRepository by lazy { HistoryRepository(this) }
 
@@ -75,7 +75,7 @@ class MagicSushiApp : Application() {
     val soundPlayer: SoundPlayer by lazy { SoundPlayer(this) }
 
     /**
-     * 预热设置缓存（FIX_PLAN D8）。
+     * 预热设置缓存。
      *
      * ## 为什么必须在这里，而且必须同步
      *
@@ -87,9 +87,6 @@ class MagicSushiApp : Application() {
      * `Application.onCreate` 是进程里最早能跑业务代码的时机，早于任何
      * Activity 和 Composable。这段阻塞被系统启动窗口完整遮住
      * （见 `MainActivity` 的 `setKeepOnScreenCondition`），玩家看不到白屏。
-     *
-     * 首次运行时这里还会触发 `SharedPreferencesMigration`，把老版本
-     * `magic_sushi_prefs.xml` 里的最高分和静音状态搬进 DataStore。
      */
     override fun onCreate() {
         super.onCreate()
