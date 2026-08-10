@@ -1,6 +1,7 @@
 package top.windyvalley.magicsushi.ui.screen
 
-import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.VectorConverter
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -46,11 +47,32 @@ fun ScoreOverlay(
     highScore: Int,
     modifier: Modifier = Modifier
 ) {
-    val animatedScore by animateIntAsState(
-        targetValue = currentScore,
-        animationSpec = tween(durationMillis = 300),
-        label = "currentScore"
-    )
+    // 分数滚动动画：只在**上升**时播，下降时直接跳到位。
+    //
+    // ## 为什么要区分方向
+    //
+    // 游戏进行中分数是单调递增的（唯一的加分点是 GameViewModel 里
+    // `score = it.score + totalScore`），所以分数**下降**只有一个来源：
+    // 新开一局把 state 重置回 0。
+    //
+    // 那次 300ms 的回滚动画在玩家眼里是「上一局的成绩在倒数」—— 一个
+    // 已经结束的对局还在界面上动，语义是错的。真正该动的只有得分那一刻。
+    //
+    // ## 为什么不用 animateIntAsState
+    //
+    // 那个 API 只接受目标值，方向判断得靠它内部的上一帧状态，拿不到也
+    // 干预不了。换成 Animatable 后「上升播动画 / 下降直接跳」是一行显式
+    // 的 if，读代码的人不需要推断框架行为。
+    val scoreAnim = remember { Animatable(currentScore, Int.VectorConverter) }
+    LaunchedEffect(currentScore) {
+        if (currentScore < scoreAnim.value) {
+            // 重置（新开一局）：立刻归位，不播回滚动画。
+            scoreAnim.snapTo(currentScore)
+        } else {
+            scoreAnim.animateTo(currentScore, animationSpec = tween(durationMillis = 300))
+        }
+    }
+    val animatedScore = scoreAnim.value
     
     Row(
         modifier = modifier
