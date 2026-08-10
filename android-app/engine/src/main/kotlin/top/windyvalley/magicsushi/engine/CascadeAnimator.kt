@@ -3,7 +3,7 @@ package top.windyvalley.magicsushi.engine
 import kotlinx.coroutines.delay
 
 /**
- * 播放一次 swap 引发的完整 cascade 动画序列（FIX_PLAN P1-1）。
+ * 播放一次 swap 引发的完整 cascade 动画序列。
  *
  * ## 为什么要从 GameViewModel 抽出来
  *
@@ -29,7 +29,7 @@ import kotlinx.coroutines.delay
  * `if (_state.value.phase != GamePhase.PLAYING) break` 的行为。
  *
  * 函数本身是 `suspend`，协程取消会正常向上传播 —— 调用方的
- * CancellationException 处理不受影响（FIX_PLAN P0-1）。
+ * CancellationException 处理不受影响。
  *
  * @param startBoard   swap 完成、尚未开始消除的棋盘。
  * @param cascades     每一轮检测到的 matches，来自

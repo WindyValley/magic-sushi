@@ -52,8 +52,7 @@ Magic Sushi v1.0
 │   └── 4 种音效 OGG（来自 EXL）
 └── 文档
     ├── README（完善）
-    ├── 05-release-notes.md
-    └── PROJECT_STATUS.md（持续更新）
+    └── 05-release-notes.md
 ```
 
 ## 3. 任务清单（27 个任务）

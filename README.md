@@ -73,32 +73,40 @@ magic-sushi/
 ├── 01-requirements.md       # 需求文档 v1.1
 ├── 02-design.md             # 设计文档 v1.1
 ├── 02-arch-diagram.md       # 架构图
+├── 02-adr/                  # 架构决策记录
+├── 02-risk.md               # 风险登记
+├── 02-tech-stack.md         # 技术选型
+├── 03-decomposition.md      # 任务拆分
+├── 03-task-graph.md         # 任务依赖图
 ├── 03-tasks/                # 30 个任务文件
-├── 04-deliverables.md       # 交付物清单
 ├── 05-release-notes.md      # 发布说明 ⬅ 你在这里
-├── PROJECT_STATUS.md        # 项目状态
+├── DELIVERABLES.md          # 交付物清单
 ├── README.md                # 本文件
 ├── LICENSE                  # MIT
+├── references/              # 美术素材、测试报告、截图
 ├── android-app/             # Android 工程
 │   ├── app/
 │   │   ├── build.gradle.kts
 │   │   └── src/
 │   │       ├── main/
 │   │       │   ├── java/top/windyvalley/magicsushi/
-│   │       │   │   ├── engine/   # 8 个核心文件（纯 Kotlin）：Models/Board/Match/Gravity/Cascade/Score/Timer/GameState
 │   │       │   │   ├── viewmodel/ # GameViewModel
 │   │       │   │   ├── ui/        # Compose 组件（screen/canvas/theme）
 │   │       │   │   ├── data/      # PrefsRepository
 │   │       │   │   └── audio/     # SoundPlayer
 │   │       │   ├── res/drawable/  # 6 个寿司 PNG（来自 EXL）
 │   │       │   └── res/raw/       # 4 个 OGG 音效
-│   │       └── test/
-│   │           └── engine/        # 6 个单元测试文件 / 55 用例
+│   │       └── test/              # ViewModel 测试
+│   ├── engine/                    # 纯 Kotlin 模块（无 Android 依赖）
+│   │   └── src/
+│   │       ├── main/kotlin/.../engine/   # 23 个核心文件
+│   │       └── test/kotlin/.../engine/   # 28 个测试文件 / 309 用例
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
 └── references/
     ├── EXL-Magic-Sushi.md   # EXL 原始资源致敬
-    └── test-report-v1.0.md  # v1.0 测试报告
+    ├── test-report-v1.0.md  # v1.0 测试报告
+    └── screenshots/         # 32 张开发期截图
 ```
 
 > **截图：** `references/screenshots/` 目录在 T-BUILD-001（debug APK 实跑）完成后补充。

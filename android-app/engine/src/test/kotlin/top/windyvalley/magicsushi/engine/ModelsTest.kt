@@ -8,7 +8,7 @@ import org.junit.Test
 /**
  * Models.kt 的基础契约测试。
  *
- * 迁移来源：`Models.kt` 末尾的 `fun main()` 手动测试（FIX_PLAN P2-2 清理）。
+ * 迁移来源：`Models.kt` 末尾的 `fun main()` 手动测试（清理）。
  * 那些 `check(...)` 断言此前没有任何 JUnit 覆盖，直接删除会丢失覆盖率，
  * 因此先在这里落地再删源文件里的 main()。
  *

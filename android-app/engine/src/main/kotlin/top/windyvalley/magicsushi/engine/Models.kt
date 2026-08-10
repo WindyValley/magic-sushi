@@ -154,7 +154,7 @@ enum class MatchAxis {
  * The auto-generated `copy()` from `data class` is the default implementation
  * required by T-CORE-008 — no custom override needed.
  *
- * ## 为什么是 List 而不是 Array（FIX_PLAN D3）
+ * ## 为什么是 List 而不是 Array
  *
  * 早期实现用 `Array<Array<SushiTile?>>`，带来两个问题：
  *

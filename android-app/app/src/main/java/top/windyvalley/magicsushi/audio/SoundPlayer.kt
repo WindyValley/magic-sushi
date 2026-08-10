@@ -10,7 +10,7 @@ import top.windyvalley.magicsushi.R
  *
  * 4 种音效对应 4 个预加载的 OGG 资源。
  *
- * ## 静音状态不由本类持有（FIX_PLAN D5）
+ * ## 静音状态不由本类持有
  *
  * 早期版本这里有一份 `_mutedFlow: MutableStateFlow<Boolean>`，于是同一个
  * "是否静音"被存了三份：`PrefsRepository`（持久化 + Flow）、本类、

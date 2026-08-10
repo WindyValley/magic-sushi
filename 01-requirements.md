@@ -222,7 +222,7 @@
 
 | ID | 描述 |
 |----|------|
-| NFR-5.1 | 状态文件：`PROJECT_STATUS.md` 始终保持最新 |
+| NFR-5.1 | 状态追踪：发布状态以 git tag + `05-release-notes.md` 为准<br>（v1.0.0 起废止独立的 PROJECT_STATUS.md —— 它与 git 历史构成双份真相，且实测已落后 4 个 commit） |
 | NFR-5.2 | 模块化：核心逻辑与 UI 分离 |
 | NFR-5.3 | 文档：README + 注释覆盖关键算法 |
 
@@ -254,7 +254,7 @@
 
 - [ ] `app-debug.apk` 能直接安装到 Android 8.0+ 设备
 - [ ] 包名：`top.windyvalley.magicsushi` ✅ 已确认
-- [ ] `PROJECT_STATUS.md` 标注 "v1.0 released"
+- [ ] git tag `v1.0.0` 已打，且与 `versionName` 一致
 - [ ] `05-release-notes.md` 写明本版本变更
 
 ---

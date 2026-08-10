@@ -20,7 +20,7 @@ package top.windyvalley.magicsushi.engine
  * （`LaunchedEffect(key)`）。当同一个信号连续以相同值触发时，字段值
  * 没有变化，`LaunchedEffect` 不会重启，**信号就丢了**。
  *
- * 真实案例（FIX_PLAN D2）：`lastRewardSeconds` 曾是 `GameState` 的字段，
+ * 真实案例：`lastRewardSeconds` 曾是 `GameState` 的字段，
  * 而 `+5s` 是当时最常见的奖励值。连续两次消除都奖励 5 秒时：
  *
  * ```

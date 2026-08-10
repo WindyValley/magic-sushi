@@ -106,7 +106,7 @@ object GravityEngine {
         // Phase 1: deep-copy the grid into a mutable scratch buffer so we can
         // fill it in place without touching the input board. Each inner row
         // must be its own MutableList (a shallow copy would alias rows).
-        // 出口处再转回不可变 List（FIX_PLAN D3）。
+        // 出口处再转回不可变 List。
         val newGrid: MutableList<MutableList<SushiTile?>> =
             MutableList(board.size) { row -> board.grid[row].toMutableList() }
 
@@ -141,7 +141,7 @@ object GravityEngine {
 
         // Phase 3: 冻结为不可变 List（每行也冻结），避免把可变引用泄漏进 Board。
         //
-        // FIX_PLAN P1-3：不再补充空格。
+        // 不再补充空格。
         //
         // 此前这里有个 `doRefill: Boolean = true` 开关，默认会顺手调
         // spawnRefill。问题在于：

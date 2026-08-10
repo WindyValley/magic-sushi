@@ -6,7 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * [GameState.presentation] 的投影语义测试（FIX_PLAN D4）。
+ * [GameState.presentation] 的投影语义测试。
  *
  * D4 把 `(board, animFrame?)` 这对隐式互斥字段收敛成密封类型
  * [BoardPresentation]，消灭了"animFrame 非空时忽略 board"这条只写在

@@ -13,7 +13,7 @@ import org.junit.Test
 /**
  * GameEventTest — 回归测试：一次性信号必须每次都投递到位。
  *
- * ## 背景（FIX_PLAN D2）
+ * ## 背景
  *
  * `lastRewardSeconds` 曾是 `GameState` 的字段，UI 侧靠
  * `LaunchedEffect(lastRewardSeconds)` 的 **key 变化** 触发 `+Ns` 飘字。

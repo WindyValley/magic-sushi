@@ -17,7 +17,7 @@ import top.windyvalley.magicsushi.engine.GameRecordCodec
 /**
  * 历史记录持久层。
  *
- * ## 为什么用 DataStore 而不是 SharedPreferences（FIX_PLAN D8）
+ * ## 为什么用 DataStore 而不是 SharedPreferences
  *
  * [PrefsRepository] 在构造函数里调 `getSharedPreferences()`，那是**主线程
  * 同步读盘**。它只存两个标量（最高分、静音）时代价可忽略；历史记录是

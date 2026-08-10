@@ -175,7 +175,7 @@ object CascadeEngine {
         for (i in 0 until MAX_CASCADE_ITERATIONS) {
             // Step A: fall, then refill.
             //
-            // FIX_PLAN P1-3：补充现在是显式的一步。
+            // 补充现在是显式的一步。
             // 此前 applyGravity 的 `doRefill` 默认 true，这里靠隐式行为
             // 拿到补满的棋盘 —— 契约藏在默认参数里，读这段代码看不出
             // "新 tile 参与了下一轮检测"这个关键事实。
@@ -186,7 +186,7 @@ object CascadeEngine {
             val fallenSnapshot = currentBoard
             currentBoard = BoardEngine.spawnRefill(currentBoard, rng)
 
-            // FIX_PLAN D8-bug2：把本轮「落下后」「补充后」两张快照留档。
+            // 把本轮「落下后」「补充后」两张快照留档。
             //
             // 动画层过去自己再调一次 applyGravity + spawnRefill 来生成帧，
             // 那是**第二次**随机采样 —— 掉下来的寿司与最终落定的不是同一批

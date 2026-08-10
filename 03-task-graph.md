@@ -180,5 +180,5 @@ T-BUILD-001 (APK)
 本图用于 eng-dev 阶段：
 1. 按关键路径顺序开发
 2. 完成一个 T-*.md 状态 → ⚪ → 🟡 → ✅
-3. 阻塞立即登记到 `PROJECT_STATUS.md` Blockers 区块
+3. 阻塞立即登记到 git commit message 与 issue 追踪
 4. eng-dev 完成后本图全 ✅ → 进入 eng-test-plan

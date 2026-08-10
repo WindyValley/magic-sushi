@@ -6,7 +6,7 @@ import org.junit.Test
 import kotlin.random.Random
 
 /**
- * FIX_PLAN P1-2 回归测试：`generateFrames` 的 `fallenBoard` 参数注入。
+ * 回归测试：`generateFrames` 的 `fallenBoard` 参数注入。
  *
  * 背景：`generateFrames` 内部需要知道「重力落地后各 tile 在哪」，此前它自己
  * 调 `GravityEngine.applyGravity(board, matches)` 算一次；
@@ -94,7 +94,7 @@ class AnimationEngineFallenBoardTest {
         val board = boardWithRowMatch()
         val matches = MatchEngine.detectMatches(board)
 
-        // FIX_PLAN P1-3：applyGravity 的职责单一化后，它永远留下空洞。
+        // applyGravity 的职责单一化后，它永远留下空洞。
         // 补充是 BoardEngine.spawnRefill 的事，必须由调用方显式发起。
         val fallen = GravityEngine.applyGravity(board, matches)
         val refilled = BoardEngine.spawnRefill(fallen, Random(42))

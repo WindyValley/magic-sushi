@@ -197,7 +197,7 @@ data class GameState(
      * 1. `GameState()` 构造不纯 —— 默认参数里跑拒绝采样循环 + RNG；
      * 2. 每局启动白算一副棋盘 —— VM 构造 `_state` 时生成一副，
      *    紧接着 `init { startGame() }` 又生成一副，第一副直接丢弃。
-     * 详见 FIX_PLAN D6。
+     * 见类注释。
      */
     val board: Board = Board(),
     val score: Int = 0,
@@ -233,7 +233,7 @@ data class GameState(
      *
      * ⚠️ **不要直接读这个字段做渲染判断**。用 [presentation] —— 它把
      * "该渲染帧还是渲染棋盘"变成编译器强制的 `when` 分支，而不是靠
-     * "非空时忽略 board"这条只写在注释里的口头约定（见 FIX_PLAN D4）。
+     * "非空时忽略 board"这条只写在注释里的口头约定。
      *
      * 本字段保留为 [GameState] 的存储形态（`copy()` 写入点），
      * [presentation] 是它与 [board] 的派生投影。
@@ -267,8 +267,7 @@ data class GameState(
 }
 
 /**
- * 棋盘渲染态。用密封类型取代 `(board, animFrame?)` 这对隐式互斥字段
- * （FIX_PLAN D4）。
+ * 棋盘渲染态。用密封类型取代 `(board, animFrame?)` 这对隐式互斥字段。
  *
  * 设计要点：**渲染只看这个类型，逻辑仍走 [GameState.board]**。
  * 手势命中测试、相邻判定这些逻辑用途需要的是"逻辑棋盘"，动画期间它

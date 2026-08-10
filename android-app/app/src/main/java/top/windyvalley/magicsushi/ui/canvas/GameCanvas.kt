@@ -87,7 +87,7 @@ private const val DragThresholdRatio = 0.3f
  * @param presentation  棋盘渲染态。`Stable` 直接画棋盘，`Animating` 画动画帧。
  *                      取代早期的 `(board, animFrame?)` 双入参 —— 那对字段
  *                      隐式互斥，靠"animFrame 非空则忽略 board"的注释约定
- *                      维持正确性（FIX_PLAN D4）。
+ *                      维持正确性。
  * @param selectedTile  the `(row, col)` currently selected, or `null`
  * @param onTileTap     callback invoked with `(row, col)` on a tap, or when
  *                      a drag ends below [DragThresholdRatio]
@@ -189,7 +189,7 @@ fun GameCanvas(
         // Layer 2: sushi tiles.
         //
         // 两个数据来源（动画帧 / 静态棋盘）先统一映射成 [TileSlot] 列表，
-        // 再走**同一套**渲染逻辑（FIX_PLAN P1-4）。
+        // 再走**同一套**渲染逻辑。
         //
         // 早期实现是 `if (animFrame != null) {...45 行...} else {...45 行...}`，
         // 两个分支逐字重复，只有 4 处不同（key / type / tileAnim / 数据源）。
@@ -283,7 +283,7 @@ fun GameCanvas(
 }
 
 /**
- * 一个待渲染的格子 —— [GameCanvas] 内部的统一渲染单元（FIX_PLAN P1-4）。
+ * 一个待渲染的格子 —— [GameCanvas] 内部的统一渲染单元。
  *
  * 把"动画帧"和"静态棋盘"这两种数据来源归一化，使渲染与手势逻辑只需写一份。
  *

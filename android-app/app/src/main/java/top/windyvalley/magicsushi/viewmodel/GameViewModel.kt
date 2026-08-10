@@ -311,11 +311,11 @@ class GameViewModel(
     private var roundSuspendedToMenu = false
 
     init {
-        // FIX_PLAN D5：把音效的静音判断绑定到 PrefsRepository —— 静音状态的
+        // 把音效的静音判断绑定到 PrefsRepository —— 静音状态的
         // 唯一数据源。SoundPlayer 自己不再存一份，避免 toggleMute 时漏同步。
         soundPlayer.bindMutedProvider(prefsRepo::isMuted)
 
-        // FIX_PLAN D5：GameState.isMuted 是 prefs 的**派生投影**（供 UI 渲染
+        // GameState.isMuted 是 prefs 的**派生投影**（供 UI 渲染
         // 图标用），靠 collect 保持同步，而不是在 toggleMute 里手工赋值。
         // 这样即使将来别处调用 prefsRepo.setMuted()，UI 也会自动跟上。
         viewModelScope.launch {
@@ -1089,7 +1089,7 @@ class GameViewModel(
                 else soundPlayer.playMatch()
 
                 // 7. 播放 3-phase 动画（每个 cascade round 各 3 帧）
-                //    时序编排已抽到 engine/CascadeAnimator.kt（FIX_PLAN P1-1）。
+                //    时序编排已抽到 engine/CascadeAnimator.kt。
                 //    这里只负责把帧写进 GameState，并在 phase 变化时中止。
                 //
                 // 把本次 swap 的最终结果落盘。
@@ -1209,7 +1209,7 @@ class GameViewModel(
      * the round state).
      */
     fun toggleMute() {
-        // FIX_PLAN D5：只写唯一数据源。SoundPlayer 通过 mutedProvider 实时读取，
+        // 只写唯一数据源。SoundPlayer 通过 mutedProvider 实时读取，
         // GameState.isMuted 由 init 中的 mutedFlow collect 自动投影 ——
         // 此处不再需要三处手工同步（旧实现漏一处即静默不一致）。
         prefsRepo.setMuted(!prefsRepo.isMuted())

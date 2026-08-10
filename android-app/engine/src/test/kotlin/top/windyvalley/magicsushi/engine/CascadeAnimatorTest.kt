@@ -9,7 +9,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * FIX_PLAN P1-1 回归测试：`playCascadeAnimation` 的时序与棋盘推进。
+ * 回归测试：`playCascadeAnimation` 的时序与棋盘推进。
  *
  * 这段逻辑此前内嵌在 GameViewModel 的 60 行协程块里，只能靠真机观察。
  * 抽出后可以用 runTest 的虚拟时钟精确断言时序 —— P1-2（双份重力）和

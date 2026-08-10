@@ -8,7 +8,7 @@ import org.junit.Test
 /**
  * TileIdUniquenessTest — 回归测试：tile id 必须全局唯一。
  *
- * ## 背景（FIX_PLAN D1）
+ * ## 背景
  *
  * `SushiTile.id` 被 `GameCanvas` 用作 Compose `key()`。同级 `key()` 重复会让
  * Compose 复用错误的 slot，导致 `SushiTile` 内部 `remember { dragOffset }` /

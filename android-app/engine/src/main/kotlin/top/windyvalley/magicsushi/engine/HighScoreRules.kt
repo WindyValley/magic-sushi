@@ -3,7 +3,7 @@ package top.windyvalley.magicsushi.engine
 /**
  * 「破纪录」的唯一定义。
  *
- * ## 为什么这个判断要放在 engine 而不是 app（FIX_PLAN D8）
+ * ## 为什么这个判断要放在 engine 而不是 app
  *
  * 它曾经写在 `PrefsRepository.saveHighScore()` 里（`if (score > currentHigh)`）
  * —— Android 类内部的隐式规则，**无法单测**。提成纯函数后，这条判据同时被

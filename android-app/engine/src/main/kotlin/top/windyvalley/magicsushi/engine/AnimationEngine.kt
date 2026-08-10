@@ -182,7 +182,7 @@ object AnimationEngine {
         // Ask GravityEngine where tiles end up after the fall.
         // applyGravity 只落不补，空洞保留下来供 SpawnIn 帧使用（P1-3）。
         //
-        // FIX_PLAN P1-2：调用方（GameViewModel 的 cascade 循环）本来也要算一次
+        // 调用方（GameViewModel 的 cascade 循环）本来也要算一次
         // 同样的重力来推进到下一轮，此前两边各算一次 —— 不仅浪费，更危险的是
         // 两次调用的参数还可能漂移（VM 那次会额外跑 RNG 补 tile）。
         // 现在允许调用方把已算好的结果传进来复用，

@@ -5,7 +5,6 @@
 ## 阶段 0：项目启动 ✅
 - [x] `projects/magic-sushi/` 目录创建
 - [x] README.md（项目入口）
-- [x] PROJECT_STATUS.md（状态总览 SSOT）
 - [x] DELIVERABLES.md（本文件）
 - [x] references/ 目录
 

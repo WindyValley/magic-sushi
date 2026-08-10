@@ -37,7 +37,7 @@ import top.windyvalley.magicsushi.engine.GameSnapshotCodec
  * `ON_STOP` 返回之后进程可能立即消失，异步落盘会被打断。所以这里提供
  * 阻塞版本，由调用方在 `ON_STOP` 里同步等到写完。
  *
- * 这与 [PrefsRepository.warmUp] 的取舍一致（FIX_PLAN D8）：一次性、有界、
+ * 这与 [PrefsRepository.warmUp] 的取舍一致：一次性、有界、
  * 用户不可见 —— 此刻界面已经退到后台，卡几十毫秒无人感知。真正要避免的
  * 是「散落在交互路径上的不可控同步 IO」，不是「一次有明确理由的阻塞」。
  *

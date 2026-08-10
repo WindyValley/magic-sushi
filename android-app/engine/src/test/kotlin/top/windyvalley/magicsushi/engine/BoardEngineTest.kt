@@ -56,7 +56,7 @@ class BoardEngineTest {
         val b = BoardEngine.generateInitialBoard(seed = 123L)
 
         // seed 保证的是「类型布局」确定，而不是 tile id 相同。
-        // id 由 TileIdGenerator 全局单调分配（见 FIX_PLAN D1），
+        // id 由 TileIdGenerator 全局单调分配，
         // 两次调用必然拿到不同 id —— 这是有意为之：id 是身份标识，
         // 复用 id 会导致 Compose key 撞号、tile 错误跳动。
         // 因此这里比较 (type, row, col)，不比较 id。
