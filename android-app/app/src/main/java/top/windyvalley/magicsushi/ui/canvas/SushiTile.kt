@@ -257,10 +257,31 @@ fun SushiTile(
     //
     // frame 2 的 Stable 不再触发任何动画，第一段 animateTo 自然跑完。
     // key 用 tileId：换 tile 时重建动画状态，同一 tile 跨帧保持进行中的下落。
-    val cascadeAnim = remember(tileId) { Animatable(0f) }
+    //
+    // ## ⚠️ 初值必须是起点，不能是 0
+    //
+    // `Animatable(0f)` 会让新出现的 tile 先在**落点**画一帧，下一帧
+    // LaunchedEffect 才 snapTo 到起点 —— 视觉上就是「闪一下再落下来」。
+    //
+    // 新生成的 tile 尤其明显：engine 的 frame 1 对 spawn 格子是
+    // `continue`（什么都不画），所以它的生命周期是
+    //
+    //   frame 1  不存在
+    //   frame 2  突然出现，带 SpawningIn
+    //
+    // 首次进入组合就带着 SpawningIn，若初值取 0 就正好在落点闪一帧。
+    // 用 cascadeOffsetYTarget 作初值，首帧即在起点，不需要靠副作用补救。
+    //
+    // 这和 ScoreOverlay 当初的 `remember { Animatable(currentScore) }` 是
+    // 同一类陷阱：remember 的 lambda 只在首次组合求值，任何"稍后再修正"
+    // 的写法都会先渲染一帧错的。
+    val cascadeAnim = remember(tileId) { Animatable(cascadeOffsetYTarget) }
     LaunchedEffect(tileId, cascadeOffsetYTarget) {
         if (cascadeOffsetYTarget != 0f) {
             // 一次下落 = 瞬间回到起点 + 动画落到位。
+            //
+            // snapTo 对「首次组合」是幂等的（初值已经是起点），它真正的
+            // 作用是同一个 tile 在连消中被复用时重置起点。
             cascadeAnim.snapTo(cascadeOffsetYTarget)
             cascadeAnim.animateTo(
                 targetValue = 0f,
