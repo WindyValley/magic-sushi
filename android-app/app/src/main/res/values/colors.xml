@@ -2,4 +2,17 @@
 <resources>
     <color name="sushi_primary">#E85D2F</color>
     <color name="sushi_bg_light">#FFE8C5</color>
+
+    <!--
+        自适应图标的背景层颜色。
+
+        刻意与 sushi_bg_light 同值而不是直接引用它（@color/sushi_bg_light）：
+        aapt 在处理 adaptive-icon 的 <background> 时要求是实色或 drawable，
+        指向另一个 color 资源的间接引用在部分构建工具版本上会解析失败。
+
+        两者必须保持一致 —— Theme.MagicSushi.Splash 的
+        windowSplashScreenBackground 用的是 sushi_bg_light，图标底色若与它
+        不同，冷启动瞬间会看到图标周围一圈色块边界。
+    -->
+    <color name="ic_launcher_background">#FFE8C5</color>
 </resources>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    ic_launcher_round 的自适应版本。
+
+    AndroidManifest 里 android:roundIcon 指向它，某些启动器（早期
+    Pixel Launcher、部分厂商 ROM）会优先读这个条目。
+
+    内容与 ic_launcher.xml 完全相同 —— 自适应图标的形状由**系统遮罩**
+    决定，不由资源自己画圆。这里不需要（也不应该）提供一个真的圆形位图：
+    那会在圆形遮罩下叠出双层边缘，在方形遮罩下露出圆角外的空白。
+
+    传统位图那套（mipmap-*dpi/ic_launcher_round.png）仍然保留并且确实是
+    圆的，因为 API 25 及以下没有遮罩机制，圆形必须自己画。
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

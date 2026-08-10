@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    自适应图标（Adaptive Icon，API 26+）。
+
+    ## 为什么需要它
+
+    改动前项目只有 mipmap-*dpi/ic_launcher.png 这种传统方形位图。
+    API 26 起启动器会按设备形状（圆形/方形/水滴形/squircle）裁剪图标，
+    传统位图被硬套进遮罩，四角内容直接被切掉。
+
+    自适应图标把图标拆成 background + foreground 两层，各 108dp，
+    但**只有中心 72dp 是安全区** —— 外圈 18dp 会被遮罩吃掉，还要留给
+    启动器做视差和缩放动画。所以前景层的寿司只占画布 60%，
+    实测 bbox (86,105)-(345,327) 落在 432px 画布的安全区 [72,360] 内。
+
+    ## 两层为什么这么分
+
+    background 用纯色 @color/ic_launcher_background（= sushi_bg_light
+    #FFE8C5），与 Theme.MagicSushi.Splash 的 windowSplashScreenBackground
+    同色。启动窗口背景和图标底色一致，冷启动时不会看到一圈色块边界。
+
+    foreground 是透明底的寿司位图，不含背景色 —— 这是规范要求，
+    前景层带底色会在遮罩边缘露出直角。
+
+    ## monochrome 为什么没配
+
+    Android 13 的主题化图标需要单色图层，但 emoji 渲染出来是彩色扁平插画，
+    转单色后寿司的米饭/鱼肉层次全部糊成一团，不如不提供 —— 系统会回退到
+    正常的彩色自适应图标。
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
