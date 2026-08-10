@@ -302,11 +302,9 @@ private fun AppRoot(
                 historyCount = records.size,
                 versionName = BuildConfig.VERSION_NAME,
                 onToggleMute = { viewModel.toggleMute() },
-                // 清空历史会连快照一起清（见 VM 的说明），所以本地那份
+                // 清空会连快照和最高分一起清（见 VM 的说明），所以本地那份
                 // 「菜单是否显示继续上局」的缓存也要失效 —— 否则回到菜单
                 // 仍会看到「继续上局」，点进去却恢复不出任何东西。
-                //
-                // 最高分刻意不动：它是长期成就，不随清空记录消失。
                 onClearHistory = { viewModel.clearHistory { hasSavedRound = false } },
                 onBack = { screen = AppScreen.Menu },
             )

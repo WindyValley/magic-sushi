@@ -56,15 +56,14 @@ import top.windyvalley.magicsushi.ui.theme.SushiBgDark
  * 由 mutedFlow 投影），但**从来没有任何 UI 调用它** —— 一个零入口的功能。
  * 玩家无法关掉音效，而代码看起来功能齐备。
  *
- * ## 为什么没有「清空最高分」
+ * ## 为什么没有「清空最高分」单独按钮
  *
- * 用户决定：最高分是玩家的长期成就，不提供清空入口。历史记录是流水，
- * 清空它属于正常的数据管理；而抹掉最高分更像是"重置存档"，那是另一种
- * 需求，且误触代价高（不可恢复且无从找回）。
+ * 最高分不是独立存储的数据，而是**历史记录的派生值**（见
+ * `HighScoreDerivation`）—— 历史清空后 `max(emptyList()) = 0`，最高分自然
+ * 归零，没有第二处需要清。
  *
- * 与之配套的 `PrefsRepository.resetHighScore()` / `GameViewModel
- * .clearHighScore()` 也一并删除，不留没有调用点的代码 —— 悬空的写入路径
- * 迟早被误用，而"暂时留着以后可能要"从来不成立。
+ * 所以设置页只有一个清空项：「清空历史记录」，它清掉历史列表 + 未完成对局
+ * 快照，最高分随之归零。
  *
  * ## 清空数据为什么要二次确认
  *
@@ -72,12 +71,13 @@ import top.windyvalley.magicsushi.ui.theme.SushiBgDark
  * 破坏性操作一律先问一次，且确认框的默认结果（返回键 / 点外部）是取消。
  *
  * @param isMuted        当前是否静音（来自 `GameState.isMuted`，即 prefs 的投影）。
- * @param historyCount   当前历史记录条数，显示在「清空历史记录」旁边 ——
- *                       让玩家知道自己要删掉什么。
+ * @param historyCount   当前历史记录条数。决定副标题文案和按钮是否可点。
+ *                       不需要额外传最高分 —— 它是历史的派生值，
+ *                       历史为空时必然为 0（见 `HighScoreDerivation`）。
  * @param versionName    版本号，由调用方从 BuildConfig 传入（UI 层不直接
  *                       依赖 BuildConfig，便于预览与测试）。
  * @param onToggleMute   切换静音。
- * @param onClearHistory 清空历史记录（已经过二次确认）。
+ * @param onClearHistory 清空记录：历史 + 快照（最高分随之归零，已经过二次确认）。
  * @param onBack         返回上一屏。
  */
 @Composable
@@ -174,9 +174,13 @@ fun SettingsScreen(
 
                 DangerRow(
                     title = "清空历史记录",
-                    // 显示当前条数：让玩家清楚要删掉的是什么，而不是点一个
-                    // 抽象的「清空」。无记录时无可清空，按钮也就没必要可点。
                     subtitle = if (historyCount > 0) "共 $historyCount 条" else "暂无记录",
+                    // 只看 historyCount 就够了。
+                    //
+                    // 最高分是历史记录的派生值（HighScoreDerivation），
+                    // 「历史空但仍有最高分」在结构上不可能出现 —— 曾经这里
+                    // 要判 `historyCount > 0 || highScore > 0`，那是双份真相
+                    // 时代的产物。
                     enabled = historyCount > 0,
                     onClick = { showClearConfirm = true },
                 )
@@ -238,11 +242,12 @@ fun SettingsScreen(
                     //  1. 不可恢复 —— 这是破坏性操作的核心告知
                     //  2. 未完成的对局也会清 —— 否则玩家会发现菜单上的
                     //     「继续上局」凭空消失，而确认框没提过
-                    //  3. 最高分不受影响 —— 主动打消顾虑。玩家最怕的就是
-                    //     一个「清空」把长期成就也带走了
+                    //  3. 最高分也会归零 —— ⚠️ 这句**必须**在。按钮叫
+                    //     「清空历史记录」，玩家不会想到最高分也在范围内；
+                    //     不说清楚就是让他在不知情的前提下丢掉长期成就。
                     text = "全部对局记录将被删除，不可恢复。\n" +
                         "未完成的对局也会一并清除。\n" +
-                        "最高分不受影响。",
+                        "最高分也会归零。",
                     color = Color(0xCCFFFFFF),
                     fontSize = 14.sp,
                     textAlign = TextAlign.Center,

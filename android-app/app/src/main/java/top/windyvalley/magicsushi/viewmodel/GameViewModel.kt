@@ -26,6 +26,7 @@ import top.windyvalley.magicsushi.engine.GameSnapshot
 import top.windyvalley.magicsushi.engine.TileIdGenerator
 import top.windyvalley.magicsushi.engine.GameRecord
 import top.windyvalley.magicsushi.engine.GravityEngine
+import top.windyvalley.magicsushi.engine.HighScoreDerivation
 import top.windyvalley.magicsushi.engine.HighScoreRules
 import top.windyvalley.magicsushi.engine.RoundSettlement
 import top.windyvalley.magicsushi.engine.GamePhase
@@ -169,7 +170,11 @@ class GameViewModel(
     private val _state = MutableStateFlow(
         GameState(
             isMuted = prefsRepo.isMuted(),
-            highScore = prefsRepo.getHighScore(),
+            // highScore 初始为默认 0，由 init 里的 historyRepo.records
+            // collect 立刻填上真实值（历史记录的 max）。
+            //
+            // 刻意不在这里同步读一次：最高分不再单独持久化，没有同步读的
+            // 入口了 —— 这正是派生方案想要的效果（只有一条数据来源）。
         )
     )
 
@@ -317,10 +322,21 @@ class GameViewModel(
                 _state.update { it.copy(isMuted = muted) }
             }
         }
-        // 同理，最高分也从 prefs 流投影过来。
+        // 最高分是**历史记录的派生值**，不再单独持久化。
+        //
+        // 曾经它存在 prefs 里，于是同一个事实有两个存储位置，必须靠调用方
+        // 记得同时写 —— 本项目为此付过两次代价（saveHighScore 漏调用点、
+        // 热缓存没同步）。改成从历史 max 派生后，历史是唯一数据源，
+        // 「忘了同步」这件事在结构上不可能发生。
+        //
+        // 正确性依赖两条不变式（RoundSettlement 破纪录必然入库 +
+        // GameHistory 按分数降序裁剪），见 HighScoreDerivation 的说明，
+        // 且有 HighScoreDerivationTest 守着。
         viewModelScope.launch {
-            prefsRepo.highScoreFlow.collect { high ->
-                _state.update { it.copy(highScore = high) }
+            historyRepo.records.collect { records ->
+                _state.update {
+                    it.copy(highScore = HighScoreDerivation.highScoreOf(records))
+                }
             }
         }
 
@@ -376,13 +392,17 @@ class GameViewModel(
         // 不清的后果：玩家重开一局后退出，菜单仍显示「继续上局」，点进去
         // 回到的是**更早那一局**的残局。
         viewModelScope.launch { snapshotRepo.clear() }
-        _state.update {
+        _state.update { current ->
             GameState(
                 board = BoardEngine.generateInitialBoard(),
                 remainingSeconds = TimerEngine.INITIAL_SECONDS,
                 phase = GamePhase.PLAYING,
                 isMuted = prefsRepo.isMuted(),
-                highScore = prefsRepo.getHighScore(),
+                // ⚠️ 必须显式带过来。这里是**重建**而非 copy，漏掉就会把
+                // 最高分重置成默认 0，UI 上表现为开新局后纪录消失
+                // （Flow 下次回灌才恢复，而只有历史变化才会回灌 ——
+                // 实际是一直显示 0 直到下一局结算）。
+                highScore = current.highScore,
             )
         }
         startTimer()
@@ -416,9 +436,17 @@ class GameViewModel(
         //
         // 现在「结算一局」是一个不可分割的动作，三条路径共用，不存在
         // 「某条路径记得做 A 忘了做 B」的空间。
+        // ⚠️ 基准取 _state.value.highScore，不是 prefsRepo.getHighScore()。
+        //
+        // 最高分现在是历史记录的派生值（见 init 里的 collect）。而 addRecord
+        // 是异步的 —— 本函数返回时 Flow 还没回灌，所以此刻的 state 里存的
+        // 正是「入库之前」的最高分，恰好就是结算需要的基准。
+        //
+        // 不能改成「先 await addRecord 再算」：结算要同步产出 isNewRecord
+        // 给庆祝动画和历史记录的标记用，挂起会让这一帧的 UI 拿不到结果。
         val outcome = RoundSettlement.settle(
             score = _state.value.score,
-            savedHighScore = prefsRepo.getHighScore(),
+            savedHighScore = _state.value.highScore,
             alreadyRecorded = currentRoundRecorded,
         )
 
@@ -426,12 +454,17 @@ class GameViewModel(
         currentRoundRecorded = true
 
         if (outcome.isNewRecord) {
-            prefsRepo.saveHighScore(outcome.newHighScore)
+            // 不再调 prefsRepo.saveHighScore —— 最高分不单独持久化了，
+            // 它会随下面的 addRecord 通过 Flow 自动派生出来。
+            //
             // 一次性庆祝效果（音效、撒花）消费此事件。
             _events.tryEmit(GameEvent.NewRecord(outcome.newHighScore))
         }
         _state.update {
             it.copy(
+                // 乐观更新：Flow 回灌前先把新纪录显示出来，否则结算面板会有
+                // 一帧显示旧的最高分。回灌后的值与这里相同（都是本局分数），
+                // 所以不会闪。
                 highScore = outcome.newHighScore,
                 isNewRecord = outcome.isNewRecord,
             )
@@ -761,7 +794,7 @@ class GameViewModel(
         // 快照已被消费，「挂起」状态随之结束。
         roundSuspendedToMenu = false
 
-        _state.update {
+        _state.update { current ->
             GameState(
                 board = snapshot.board,
                 score = snapshot.score,
@@ -769,7 +802,8 @@ class GameViewModel(
                 remainingSeconds = snapshot.remainingSeconds,
                 phase = GamePhase.PAUSED,
                 isMuted = prefsRepo.isMuted(),
-                highScore = prefsRepo.getHighScore(),
+                // 同 startGame：这里是重建，最高分必须显式带过来。
+                highScore = current.highScore,
             )
         }
 
@@ -1161,29 +1195,49 @@ class GameViewModel(
     // ========================================================================
 
     /**
-     * 清空历史记录。
+     * 清空全部记录：历史、快照、最高分。
+     *
+     * ## 为什么三者是一个动作
+     *
+     * 玩家的意图是「把我的记录都抹掉」，而这三份数据都是那个意图的一部分。
+     * 拆成多个开关只会让人分别点三次，且很容易漏掉一项后以为没清干净。
      *
      * ## 为什么连快照一起清
      *
-     * 快照是「有一局被中断了」的凭证，而那一局的成绩尚未入库。玩家清空历史
-     * 的意图是「把过去的记录都抹掉」，若留下快照，他恢复那一局玩完后，历史
-     * 里会**凭空多出一条**刚被清空的记录 —— 看起来像清空失败了。
+     * 快照是「有一局被中断了」的凭证，而那一局的成绩尚未入库。若留下快照，
+     * 玩家恢复那一局玩完后，历史里会**凭空多出一条**刚被清空的记录 ——
+     * 看起来像清空失败了。
      *
      * 顺带也避免了更隐蔽的一种：那个残局若在清空前已被结算过
      * （currentRoundRecorded），恢复它还会因幂等保护而不再入库。
      *
-     * ## 为什么不碰最高分
+     * ## 最高分为什么不用单独清
      *
-     * 最高分是玩家的长期成就，不随「清空记录」一起消失（用户明确要求）。
-     * 这也是设置页只有一个清空项的原因 —— 没有「清空最高分」入口，
-     * 相应的 `PrefsRepository.resetHighScore()` 也不存在。
+     * 它是历史记录的派生值（见 [HighScoreDerivation]），历史清空后
+     * `max(emptyList()) = 0` 会通过 Flow 自动投影过来。
      *
-     * @param onDone 落盘后的回调（主线程），供 UI 提示「已清空」。
+     * 这是派生方案的直接红利：曾经这里要额外调一次 `resetHighScore()`，
+     * 而那个方法还得绕开 saveHighScore 的「只升不降」守卫 —— 一个为了
+     * 维护双份真相而存在的别扭写法。现在两者都不需要了。
+     *
+     * ## 为什么还要清 isNewRecord
+     *
+     * 那个标记的含义是「本局分数 > 当时的最高分」。最高分归零后它引用的是
+     * 一个已经不存在的基准，留着会让结算面板继续显示「🏆 新纪录」，而玩家
+     * 刚刚亲手把纪录清空了 —— 界面在自相矛盾。
+     *
+     * 也不重算（比如改成「score > 0 就算新纪录」）：清空动作不该顺手给玩家
+     * 颁发一个他没挣到的纪录。
+     *
+     * @param onDone 全部落盘后的回调（主线程）。
      */
     fun clearHistory(onDone: () -> Unit = {}) {
         viewModelScope.launch {
             historyRepo.clear()
             snapshotRepo.clear()
+            // 最高分随历史清空自动归零（派生），这里只需处理它带不动的
+            // 派生标记。
+            _state.update { it.copy(isNewRecord = false) }
             onDone()
         }
     }

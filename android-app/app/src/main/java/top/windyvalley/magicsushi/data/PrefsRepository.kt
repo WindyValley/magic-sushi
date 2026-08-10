@@ -8,7 +8,6 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
-import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -19,7 +18,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import top.windyvalley.magicsushi.engine.HighScoreRules
 
 /**
  * 设置类持久化仓库（DataStore 实现，FIX_PLAN D8）。
@@ -96,14 +94,13 @@ private val Context.settingsDataStore: DataStore<Preferences> by preferencesData
             SharedPreferencesMigration(
                 context = ctx,
                 sharedPreferencesName = LEGACY_PREFS_NAME,
-                keysToMigrate = setOf(LEGACY_KEY_HIGH_SCORE, LEGACY_KEY_MUTED),
+                keysToMigrate = setOf(LEGACY_KEY_MUTED),
             )
         )
     }
 )
 
 private const val LEGACY_PREFS_NAME = "magic_sushi_prefs"
-private const val LEGACY_KEY_HIGH_SCORE = "high_score"
 private const val LEGACY_KEY_MUTED = "muted"
 
 class PrefsRepository(
@@ -199,13 +196,10 @@ class PrefsRepository(
     // 设置项声明 —— 加字段只需在这里加一行
     // ========================================================================
 
-    /** 历史最高分。写入请走 [saveHighScore]（含只升不降规则）。 */
-    val highScore = Setting(KEY_HIGH_SCORE, default = 0)
-
     /** 静音开关。 */
     val muted = Setting(KEY_MUTED, default = false)
 
-    private val allSettings = listOf(highScore, muted)
+    private val allSettings = listOf(muted)
 
     // ========================================================================
     // 预热
@@ -241,44 +235,11 @@ class PrefsRepository(
     // 这几个方法让 GameViewModel / SoundPlayer 的 5 处调用无需改动。
     // ========================================================================
 
-    /** 当前最高分（同步）。 */
-    fun getHighScore(): Int = highScore.value
-
     /** 当前是否静音（同步）。 */
     fun isMuted(): Boolean = muted.value
 
-    /** 供 UI 订阅的最高分流。 */
-    val highScoreFlow: Flow<Int> get() = highScore.flow
-
     /** 供 UI 订阅的静音流。 */
     val mutedFlow: Flow<Boolean> get() = muted.flow
-
-    /**
-     * 保存新最高分（**只升不降**，规则见
-     * [HighScoreRules.isNewRecord]）。
-     *
-     * 缓存**同步**更新，落盘异步 —— 调用方（`GameViewModel.onGameOver`）
-     * 紧接着就会读 `getHighScore()`，等协程跑完再更新会让最高分表现为
-     * 「不更新」：弹窗里是对的（那读的是 state），但回菜单再进或杀进程
-     * 重开就丢了。
-     *
-     * 事务内再比较一次：调用方的判断基于稍旧的缓存值，而事务内读到的是
-     * 权威值，可防并发写覆盖（例如 game over 与 quit 几乎同时触发）。
-     */
-    fun saveHighScore(score: Int) {
-        // 同步守卫 + 同步更新缓存：只升不降的语义在内存里也必须成立。
-        if (!HighScoreRules.isNewRecord(score, highScore.value)) return
-        highScore.setCachedValue(score)
-
-        scope.launch {
-            dataStore.edit { prefs ->
-                val current = highScore.read(prefs)
-                if (HighScoreRules.isNewRecord(score, current)) {
-                    highScore.put(prefs, score)
-                }
-            }
-        }
-    }
 
     /**
      * 设置静音状态。
@@ -308,7 +269,9 @@ class PrefsRepository(
     companion object {
         // 键名与旧 SharedPreferences 保持一致，让 SharedPreferencesMigration
         // 能原样搬过来（它按 key 字符串匹配）。改名就等于丢老数据。
-        private val KEY_HIGH_SCORE = intPreferencesKey(LEGACY_KEY_HIGH_SCORE)
+        //
+        // 最高分的键已移除：它不再单独持久化，改为从历史记录派生
+        // （见 HighScoreDerivation）。
         private val KEY_MUTED = booleanPreferencesKey(LEGACY_KEY_MUTED)
     }
 }
