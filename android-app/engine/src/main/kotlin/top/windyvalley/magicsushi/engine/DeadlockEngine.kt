@@ -106,54 +106,105 @@ object DeadlockEngine {
     }
 
     /**
-     * 若 [board] 是死局则重排，否则原样返回。
+     * 重排的结果：新棋盘 + 每个格子的内容从哪来。
      *
-     * @param rng 注入随机源，测试可传固定 seed 复现
-     * @return `(新棋盘, 是否发生了重排)`
+     * @property board       重排后的棋盘。
+     * @property didReshuffle 是否真的重排了（原本有解时为 false）。
+     * @property origin      `(目标行,目标列) -> (来源行,来源列)`。
      *
-     * 返回的 boolean 是给 UI 用的：`true` 时需要提示玩家「局面无解，已重排」，
-     * 否则玩家会看到棋盘无故跳变。
+     *                       UI 靠它算每个寿司的移动轨迹。只包含真正移动了的
+     *                       格子 —— 原地不动的不进这个表，省得 UI 为一堆
+     *                       零位移的 tile 建动画状态。
+     *
+     *                       [didReshuffle] 为 false 时必然为空。
+     */
+    data class ReshuffleResult(
+        val board: Board,
+        val didReshuffle: Boolean,
+        val origin: Map<Pair<Int, Int>, Pair<Int, Int>>,
+    )
+
+    /**
+     * 死局则重排，否则原样返回。
+     *
+     * ## 为什么要追踪来源
+     *
+     * 初版只洗 `type`（tile 实体不动），信息不足以画移动动画：同类型的寿司
+     * 有好几个，「(3,4) 现在这个 5 号是从哪来的」根本无法回答 —— 原本 (0,0)
+     * 和 (6,6) 可能都是 5 号。
+     *
+     * 现在洗的是**格子内容的置换**：先给每个非空格编号，洗号码，于是
+     * 「新的 i 号位置装的是原来的 perm[i] 号位置的内容」，来源唯一确定。
+     *
+     * 类型分布不变量仍然成立 —— 置换只是重新分配同一批内容。
      */
     fun reshuffleIfDeadlocked(
         board: Board,
         rng: Random = Random.Default,
-    ): Pair<Board, Boolean> {
-        if (hasValidMove(board)) return board to false
+    ): ReshuffleResult {
+        if (hasValidMove(board)) {
+            return ReshuffleResult(board, didReshuffle = false, origin = emptyMap())
+        }
 
         repeat(MAX_RESHUFFLE_ATTEMPTS) {
             // 纯随机洗牌撞上三连的概率不低（类型越少越容易撞），所以洗完先
             // 做一轮局部修复：把造成三连的格子与随机位置对调，直到无三连。
             // 比「整盘重洗到碰巧合法」收敛快一个量级。
-            val candidate = repairMatches(shuffleTypes(board, rng), rng)
+            val shuffled = shuffleWithOrigin(board, rng)
+            val repaired = repairMatchesTracked(shuffled, rng)
 
             // 双条件：不能有已成立的三连（否则玩家没操作就自动消除加分），
             // 且必须有解（否则重排了还是死局，白搭）。
-            if (candidate != null && hasValidMove(candidate)) {
-                return candidate to true
+            if (repaired != null && hasValidMove(repaired.board)) {
+                return ReshuffleResult(
+                    board = repaired.board,
+                    didReshuffle = true,
+                    // 只留真正动了的格子。
+                    origin = repaired.origin.filterKeys { key ->
+                        repaired.origin[key] != key
+                    },
+                )
             }
         }
 
         // 兜底：洗不出合法局面。返回原棋盘 + false，让调用方按「未重排」处理 ——
         // 宁可维持死局让倒计时结束，也不返回一个有三连的棋盘造成自动连锁。
-        return board to false
+        return ReshuffleResult(board, didReshuffle = false, origin = emptyMap())
     }
 
     /**
-     * 消掉洗牌产生的已成立三连，保持类型分布不变。
+     * 洗牌中间态：棋盘 + 每格内容的来源。
+     *
+     * 只在重排流程内部流转，对外暴露的是 [ReshuffleResult]。
+     */
+    private data class TrackedBoard(
+        val board: Board,
+        /** `(目标行,目标列) -> (来源行,来源列)`，含原地不动的格子。 */
+        val origin: Map<Pair<Int, Int>, Pair<Int, Int>>,
+    )
+
+    /**
+     * 消掉洗牌产生的已成立三连，同时维护来源映射。
      *
      * 做法：找到任意一个匹配里的一个格子，与棋盘上随机另一格**对调类型**。
      * 对调而非改写，所以类型总数不变 —— 这是 [reshuffleIfDeadlocked] 的
      * 分布不变量所依赖的关键性质。
      *
-     * @return 修好的棋盘；若 [REPAIR_ROUNDS] 轮内没能消完三连则返回 `null`
-     *         （交给调用方重洗）
+     * ## 为什么对调时也要换来源
+     *
+     * 修复是「把 A 格和 B 格的内容互换」。若只换 type 不换 origin，来源映射
+     * 就会说谎 —— UI 会让寿司飞向错误的起点，动画看着像随机乱窜。
+     *
+     * @return 修好的棋盘 + 来源；若 [REPAIR_ROUNDS] 轮内没能消完三连则返回
+     *         `null`（交给调用方重洗）
      */
-    private fun repairMatches(board: Board, rng: Random): Board? {
-        var current = board
+    private fun repairMatchesTracked(tracked: TrackedBoard, rng: Random): TrackedBoard? {
+        var current = tracked.board
+        val origin = tracked.origin.toMutableMap()
 
         repeat(REPAIR_ROUNDS) {
             val matches = MatchEngine.detectMatches(current)
-            if (matches.isEmpty()) return current
+            if (matches.isEmpty()) return TrackedBoard(current, origin)
 
             // 取第一个匹配的中间那块 —— 中间格参与的连线最多，
             // 换掉它比换端点更容易一次打断整条线。
@@ -163,15 +214,35 @@ object DeadlockEngine {
             val partner = randomCellWithDifferentType(current, victim.type, rng)
                 ?: return null // 全盘只剩一种类型，无从修复
 
-            current = current.withTypesSwapped(
+            // 实体互换：两个 tile 交换所在格，各自的 row/col 跟着更新。
+            //
+            // ⚠️ 不能用 withTypesSwapped —— 那个只换 type、不动实体，会破坏
+            // shuffleWithOrigin 刚建立的「tile 带身份搬家」语义：id 留在原格
+            // 而 type 飞走，Compose 那边就变成两个 tile 各自原地换脸，
+            // 移动动画彻底失效。
+            current = current.withTilesSwapped(
                 victim.row, victim.col,
                 partner.row, partner.col,
-                victim.type, partner.type,
             )
+
+            // 内容互换了，来源也必须跟着换 —— 否则映射与实际不符，
+            // UI 会让寿司飞向错误的起点。
+            val vKey = victim.row to victim.col
+            val pKey = partner.row to partner.col
+            val vOrigin = origin[vKey]
+            val pOrigin = origin[pKey]
+            if (vOrigin != null && pOrigin != null) {
+                origin[vKey] = pOrigin
+                origin[pKey] = vOrigin
+            }
         }
 
         // 轮数耗尽仍有三连 —— 返回 null 触发重洗。
-        return if (MatchEngine.detectMatches(current).isEmpty()) current else null
+        return if (MatchEngine.detectMatches(current).isEmpty()) {
+            TrackedBoard(current, origin)
+        } else {
+            null
+        }
     }
 
     /**
@@ -187,39 +258,76 @@ object DeadlockEngine {
     }
 
     /**
-     * Fisher-Yates 洗牌棋盘上所有非空 tile 的类型。
+     * Fisher-Yates 洗牌，**tile 实体带着自己的身份搬家**。
      *
-     * 位置与 tile id 保持不变，只有 [SushiTile.type] 被重新分配。
+     * ## 为什么是实体搬家，不是洗类型
+     *
+     * 初版洗的是 `type`：id 与位置不动，只重新分配类型。那个模型画不出移动
+     * 动画，有两个原因：
+     *
+     * 1. **来源无法确定** —— 同类型寿司有好几个。原本 (0,0) 和 (6,6) 都是
+     *    5 号，现在 (3,4) 是 5 号，它从哪来？答不出来就没有起点。
+     *
+     * 2. **语义不对** —— `GameCanvas` 用 `key(tileId)`。id 不动而 type 变，
+     *    在 Compose 看来是「同一个 tile 原地换了张脸」，压根没有位移这回事。
+     *
+     * 实体搬家把语义摆正了：tile 保留自己的 id，`row`/`col` 更新为新位置。
+     * Compose 看到的是「同一个 tile 挪到了别处」—— 与 [TileAnim.Falling]
+     * 完全一致的语义，下落也正是同一个 tile 换 row。
+     *
+     * ## 不变量
+     *
+     * - **类型分布不变**：置换只是重新分配同一批 tile，没有生成或销毁。
+     * - **id 集合不变**：搬家不改 id，只是 id 出现在了别的格子里。
+     * - **`tile.row`/`tile.col` 与所在格一致**：这是 engine 的既有约定，
+     *   `MatchEngine` 等下游依赖它。搬完必须 `copy` 更新，不能只挪引用。
+     *
+     * @return 新棋盘 + `(目标格 -> 来源格)` 映射，UI 靠它算移动轨迹
      */
-    private fun shuffleTypes(board: Board, rng: Random): Board {
-        // 收集所有非空格的坐标与类型。
+    private fun shuffleWithOrigin(board: Board, rng: Random): TrackedBoard {
+        // 收集所有非空格的坐标。空格（若有）不参与洗牌。
         val cells = mutableListOf<Pair<Int, Int>>()
-        val types = mutableListOf<SushiType>()
-
         for (row in board.grid.indices) {
             for (col in board.grid[row].indices) {
-                val tile = board.grid[row][col] ?: continue
-                cells += row to col
-                types += tile.type
+                if (board.grid[row][col] != null) cells += row to col
             }
         }
 
-        // Fisher-Yates：从后往前，每步与前面（含自己）的随机位置交换。
-        for (i in types.indices.reversed()) {
+        // perm[i] = i 先建恒等置换，再 Fisher-Yates 打乱。
+        // 洗「格子编号」而非「类型列表」是这次重写的核心 —— 编号唯一，
+        // 所以「新的 i 号格装的是原来 perm[i] 号格那个 tile」来源确定。
+        val perm = IntArray(cells.size) { it }
+        for (i in perm.indices.reversed()) {
             val j = rng.nextInt(i + 1)
-            val tmp = types[i]
-            types[i] = types[j]
-            types[j] = tmp
+            val tmp = perm[i]
+            perm[i] = perm[j]
+            perm[j] = tmp
         }
 
-        // 按洗好的顺序回填。
         val newGrid = board.grid.map { it.toMutableList() }
-        cells.forEachIndexed { index, (row, col) ->
-            val tile = newGrid[row][col] ?: return@forEachIndexed
-            newGrid[row][col] = tile.copy(type = types[index])
+        val origin = mutableMapOf<Pair<Int, Int>, Pair<Int, Int>>()
+
+        cells.forEachIndexed { index, target ->
+            val source = cells[perm[index]]
+            val movingTile = board.grid[source.first][source.second] ?: return@forEachIndexed
+
+            // 整个 tile 搬过来：id 与 type 跟着走，row/col 改成新位置。
+            //
+            // ⚠️ 必须更新 row/col —— engine 里 tile 自带坐标，下游（MatchEngine
+            // 的匹配收集、CascadeEngine 的重力计算）都读 tile.row/col 而非
+            // 遍历下标。只挪引用不改坐标，会得到一个「自称在 (0,0) 却躺在
+            // (3,4) 格里」的 tile，后续判定全乱。
+            newGrid[target.first][target.second] = movingTile.copy(
+                row = target.first,
+                col = target.second,
+            )
+            origin[target] = source
         }
 
-        return board.copy(grid = newGrid.map { it.toList() })
+        return TrackedBoard(
+            board = board.copy(grid = newGrid.map { it.toList() }),
+            origin = origin,
+        )
     }
 
     /**
@@ -270,6 +378,46 @@ object DeadlockEngine {
         }
 
         return board.copy(grid = grid)
+    }
+
+    /**
+     * 返回一个把 `(r1,c1)` 和 `(r2,c2)` 的 **tile 实体**互换后的棋盘。
+     *
+     * 与 [withTypesSwapped] 的区别：这个搬实体（id 跟着走，row/col 更新），
+     * 那个只换 type（id 留在原格）。
+     *
+     * - 重排修复用这个 —— 必须维持「tile 带身份搬家」语义
+     * - 死局检测用 [withTypesSwapped] —— 那是只读探测，只关心
+     *   [MatchEngine.detectMatches] 的结果，不需要身份正确，换 type 更省
+     *
+     * 两个函数看着像重复，实际语义不同，别合并。
+     */
+    private fun Board.withTilesSwapped(
+        r1: Int, c1: Int,
+        r2: Int, c2: Int,
+    ): Board {
+        val tile1 = grid[r1][c1] ?: return this
+        val tile2 = grid[r2][c2] ?: return this
+
+        val newGrid = grid.toMutableList()
+
+        if (r1 == r2) {
+            // 同一行：一次重建即可。
+            val row = newGrid[r1].toMutableList()
+            row[c1] = tile2.copy(row = r1, col = c1)
+            row[c2] = tile1.copy(row = r2, col = c2)
+            newGrid[r1] = row
+        } else {
+            val row1 = newGrid[r1].toMutableList()
+            row1[c1] = tile2.copy(row = r1, col = c1)
+            newGrid[r1] = row1
+
+            val row2 = newGrid[r2].toMutableList()
+            row2[c2] = tile1.copy(row = r2, col = c2)
+            newGrid[r2] = row2
+        }
+
+        return copy(grid = newGrid)
     }
 
     /**

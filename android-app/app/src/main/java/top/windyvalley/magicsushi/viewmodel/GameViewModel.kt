@@ -19,6 +19,7 @@ import top.windyvalley.magicsushi.data.HistoryRepository
 import top.windyvalley.magicsushi.data.PrefsRepository
 import top.windyvalley.magicsushi.data.SnapshotRepository
 import top.windyvalley.magicsushi.engine.BoardEngine
+import top.windyvalley.magicsushi.engine.Board
 import top.windyvalley.magicsushi.engine.AnimationEngine
 import top.windyvalley.magicsushi.engine.CascadeEngine
 import top.windyvalley.magicsushi.engine.DeadlockEngine
@@ -39,6 +40,7 @@ import top.windyvalley.magicsushi.engine.ScoreEngine
 import top.windyvalley.magicsushi.engine.SwapResult
 import top.windyvalley.magicsushi.engine.TimerEngine
 import top.windyvalley.magicsushi.engine.playCascadeAnimation
+import top.windyvalley.magicsushi.engine.playReshuffleAnimation
 
 /**
  * GameViewModel.kt — UI state coordinator for Magic Sushi.
@@ -400,7 +402,7 @@ class GameViewModel(
             //
             // 刻意不发 BoardReshuffled 事件：玩家还没看过原始棋盘，
             // 提示「已重排」只会让人困惑「重排了什么」。
-            val (settledBoard, _) = DeadlockEngine.reshuffleIfDeadlocked(initialBoard)
+            val settledBoard = DeadlockEngine.reshuffleIfDeadlocked(initialBoard).board
             GameState(
                 board = settledBoard,
                 remainingSeconds = TimerEngine.INITIAL_SECONDS,
@@ -1111,12 +1113,16 @@ class GameViewModel(
                         // 棋盘落定后检测死局。必须放在这里而不是动画开始前 ——
                         // 连锁结束、重力和补充都跑完，此刻的 finalBoard 才是
                         // 玩家将要面对的局面。
-                        val (settledBoard, didReshuffle) =
+                        val reshuffle =
                             DeadlockEngine.reshuffleIfDeadlocked(cascadeResult.finalBoard)
 
                         _state.update {
                             it.copy(
-                                board = settledBoard,
+                                // 先落这一局连锁的结果（未重排的棋盘）。
+                                // 重排动画由下面的 playReshuffleAnimation 接手 ——
+                                // 直接写重排后的棋盘会让玩家看到瞬间跳变，
+                                // 那正是「跟重开似的」的来源。
+                                board = cascadeResult.finalBoard,
                                 animFrame = null,
                                 score = it.score + totalScore,
                                 combo = cascadeResult.cascades.size,
@@ -1125,8 +1131,17 @@ class GameViewModel(
                             )
                         }
 
-                        // 状态落盘后再发通知，保证 UI 弹提示时棋盘已是重排后的。
-                        if (didReshuffle) _events.tryEmit(GameEvent.BoardReshuffled)
+                        if (reshuffle.didReshuffle) {
+                            // 不 await —— commitFinalState 可能在动画被取消的
+                            // 路径上调用，那里不能挂起。用独立协程播重排动画。
+                            viewModelScope.launch {
+                                playReshuffleWithNotice(
+                                    fromBoard = cascadeResult.finalBoard,
+                                    reshuffle = reshuffle,
+                                    generation = myGeneration,
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -1268,12 +1283,58 @@ class GameViewModel(
         if (_state.value.phase != GamePhase.PLAYING) return
 
         val deadlocked = DeadlockEngine.forceDeadlock(_state.value.board)
-        val (settled, didReshuffle) = DeadlockEngine.reshuffleIfDeadlocked(deadlocked)
+        val reshuffle = DeadlockEngine.reshuffleIfDeadlocked(deadlocked)
 
-        _state.update { it.copy(board = settled, selectedTile = null) }
+        // 先把死局盘落进 state，让玩家看到「无解的局面」这一帧 ——
+        // 重排动画的起点就是它。直接跳到重排后的棋盘，玩家不知道刚才发生了什么。
+        _state.update { it.copy(board = deadlocked, selectedTile = null) }
 
-        // 走的是与真实死局完全相同的通知路径，所以这个入口也能验证 Toast。
-        if (didReshuffle) _events.tryEmit(GameEvent.BoardReshuffled)
+        if (reshuffle.didReshuffle) {
+            viewModelScope.launch {
+                playReshuffleWithNotice(deadlocked, reshuffle, roundGeneration)
+            }
+        }
+    }
+
+    /**
+     * 播放重排动画并发出提示。
+     *
+     * ## 提示与动画的先后
+     *
+     * 提示先发、动画后播。玩家需要先知道「怎么了」（局面无解），才能理解
+     * 接下来看到的移动是什么意思。反过来先播动画，玩家会先困惑一下
+     * 「棋盘怎么突然动了」，提示到得太晚。
+     *
+     * @param generation 起始代际。restart 会让它失效，动画随之中止。
+     */
+    private suspend fun playReshuffleWithNotice(
+        fromBoard: Board,
+        reshuffle: DeadlockEngine.ReshuffleResult,
+        generation: Long,
+    ) {
+        _events.tryEmit(GameEvent.BoardReshuffled)
+
+        playReshuffleAnimation(
+            fromBoard = fromBoard,
+            toBoard = reshuffle.board,
+            origin = reshuffle.origin,
+            shouldContinue = { generation == roundGeneration },
+            onFrame = { board, frame ->
+                if (generation != roundGeneration) return@playReshuffleAnimation
+                _state.update {
+                    if (board != null) it.copy(board = board, animFrame = frame)
+                    else it.copy(animFrame = frame)
+                }
+            },
+        )
+
+        // 动画结束，清掉帧回到静态渲染。
+        //
+        // 代际再查一次：动画期间可能发生 restart，那时 animFrame 已属于新局，
+        // 清掉会让新局的进行中动画凭空消失。
+        if (generation == roundGeneration) {
+            _state.update { it.copy(animFrame = null) }
+        }
     }
 
     // ========================================================================

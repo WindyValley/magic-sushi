@@ -208,21 +208,74 @@ class DeadlockEngineTest {
     }
 
     @Test
-    fun `reshuffle preserves tile ids and positions`() {
+    fun `reshuffle moves tile entities and keeps coordinates consistent`() {
         val board = deadlockBoard()
-        val (result, _) = DeadlockEngine.reshuffleIfDeadlocked(board, Random(7))
+        val result = DeadlockEngine.reshuffleIfDeadlocked(board, Random(7)).board
 
+        // ## 语义变更记录（v1.0.1 起）
+        //
+        // 这条测试原来断言「id 与位置都不变」，前提是洗牌只重新分配 type、
+        // tile 实体留在原格。那个模型画不出移动动画（同类型寿司无法区分
+        // 来源），已被 tile 实体搬家取代。
+        //
+        // 现在成立的不变量是下面三条，比原来更强 —— 原来只查了「没变」，
+        // 现在要查「搬对了」。
+
+        // 1. id 集合不变：搬家不生成也不销毁 tile，只是 id 出现在别的格子里。
+        val originalIds = board.grid.flatten().filterNotNull().map { it.id }.sorted()
+        val shuffledIds = result.grid.flatten().filterNotNull().map { it.id }.sorted()
+        assertEquals("tile id 集合不能变（不新建也不丢弃 tile）", originalIds, shuffledIds)
+
+        // 2. 每个 tile 自带的坐标必须与它实际所在的格子一致。
+        //
+        // 这条是搬家实现最容易错的地方：只挪引用忘了 copy(row=, col=)，
+        // 就会得到「自称在 (0,0) 却躺在 (3,4) 格里」的 tile。
+        // MatchEngine / GravityEngine 都读 tile.row/col 而非遍历下标，
+        // 不一致会让后续所有判定错位。
         for (row in 0 until board.size) {
             for (col in 0 until board.size) {
-                val original = board.grid[row][col]!!
-                val shuffled = result.grid[row][col]!!
-
-                // id 稳定是 Compose 增量渲染的前提：id 绑格子不绑类型，
-                // 重排才会表现为「原地换内容」而不是 49 个 tile 全部重建。
-                assertEquals("id at ($row,$col) must not change", original.id, shuffled.id)
-                assertEquals("row at ($row,$col) must not change", original.row, shuffled.row)
-                assertEquals("col at ($row,$col) must not change", original.col, shuffled.col)
+                val tile = result.grid[row][col]!!
+                assertEquals("($row,$col) 的 tile.row 必须等于所在行", row, tile.row)
+                assertEquals("($row,$col) 的 tile.col 必须等于所在列", col, tile.col)
             }
+        }
+
+        // 3. 类型分布不变：置换只是重新分配同一批 tile。
+        val originalTypes = board.grid.flatten().filterNotNull()
+            .groupingBy { it.type }.eachCount()
+        val shuffledTypes = result.grid.flatten().filterNotNull()
+            .groupingBy { it.type }.eachCount()
+        assertEquals("类型分布不能变", originalTypes, shuffledTypes)
+    }
+
+    @Test
+    fun `reshuffle origin map points at the real source cell`() {
+        val board = deadlockBoard()
+        val result = DeadlockEngine.reshuffleIfDeadlocked(board, Random(7))
+
+        assertTrue("这个棋盘应当触发重排", result.didReshuffle)
+        assertTrue("重排后 origin 不应为空", result.origin.isNotEmpty())
+
+        // origin 是 UI 画移动轨迹的唯一依据 —— 它说谎，寿司就会从错误的
+        // 位置飞出来。这里逐条核对：目标格的 type 必须等于来源格原本的 type。
+        for ((target, source) in result.origin) {
+            val (tr, tc) = target
+            val (sr, sc) = source
+
+            val movedTile = result.board.grid[tr][tc]!!
+            val sourceTile = board.grid[sr][sc]!!
+
+            assertEquals(
+                "($tr,$tc) 声称来自 ($sr,$sc)，类型必须与来源格原本的类型一致",
+                sourceTile.type,
+                movedTile.type,
+            )
+        }
+
+        // origin 只收录真正移动了的格子 —— 原地不动的不该出现在表里，
+        // 否则 UI 会为一堆零位移的 tile 建动画状态。
+        for ((target, source) in result.origin) {
+            assertTrue("原地未动的格子 $target 不应出现在 origin 里", target != source)
         }
     }
 
