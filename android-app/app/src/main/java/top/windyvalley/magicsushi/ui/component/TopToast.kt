@@ -5,8 +5,11 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -17,7 +20,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
@@ -99,24 +101,62 @@ fun TopToast(
         modifier = modifier.fillMaxWidth(),
         contentAlignment = Alignment.TopCenter,
     ) {
-        Text(
-            text = message,
-            color = Color.White,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Medium,
-            textAlign = TextAlign.Center,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .graphicsLayer {
                     // 位移只在入场时有意义：从上方滑下。
                     translationY = (progress - 1f) * SLIDE_DISTANCE_PX
+
+                    // 轻微缩放让浮出有「弹出来」的质感，而不只是平移。
+                    // 0.92→1.0 的幅度刻意很小 —— 大了会显得廉价。
+                    val s = 0.92f + 0.08f * progress
+                    scaleX = s
+                    scaleY = s
+
+                    alpha = progress
                 }
-                .alpha(progress)
+                // 外层琥珀色描边 + 内层深棕底：与游戏的暖色寿司美术同一套色系。
+                //
+                // 之前是纯深色圆角矩形 + 白字，那是 Material 默认 Snackbar 的
+                // 长相，跟满屏暖色寿司放在一起像是另一个 App 的控件。
+                .background(
+                    color = ToastBorder,
+                    shape = RoundedCornerShape(CORNER_RADIUS_DP.dp),
+                )
+                .padding(BORDER_WIDTH_DP.dp)
                 .background(
                     color = ToastBg,
-                    shape = RoundedCornerShape(20.dp),
+                    // 内圈半径要比外圈小一个边宽，否则内层的角会「顶」出外层，
+                    // 描边在四个角上看起来忽然变窄。
+                    shape = RoundedCornerShape((CORNER_RADIUS_DP - BORDER_WIDTH_DP).dp),
                 )
-                .padding(horizontal = 20.dp, vertical = 10.dp),
-        )
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+        ) {
+            // 图标承担「这是什么事」的第一眼识别，比读完整句话快。
+            //
+            // ⚠️ 用 `⇄`（U+21C4，箭头区）而不是 emoji `🔀`（U+1F500）。
+            // 后者在模拟器和部分低端机上字体覆盖不全，会降级成豆腐块 ——
+            // 实测在 API 34 模拟器上渲染成一个橙底白 X 的方块，看着像错误
+            // 提示而不是「重新排列」。
+            //
+            // U+21C4 属于基础箭头区，字体覆盖远好于 emoji 平面，且它本身就是
+            // 「左右互换」的语义，比洗牌 emoji 更贴合「棋盘重排」。
+            Text(
+                text = "⇄",
+                color = ToastBorder,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = message,
+                color = ToastText,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 
@@ -138,5 +178,29 @@ private const val EXIT_MS = 180
  */
 private const val SLIDE_DISTANCE_PX = 64f
 
-/** 提示条背景：半透明深色，压在棋盘上也能看清文字。 */
-private val ToastBg = Color(0xE6202020)
+/** 圆角半径（dp）。偏大的圆角配暖色调更亲和，接近棋子的圆润感。 */
+private const val CORNER_RADIUS_DP = 18
+
+/** 描边宽度（dp）。1.5 太细看不出，3 太重像加了黑框，2 刚好。 */
+private const val BORDER_WIDTH_DP = 2
+
+/**
+ * 提示条底色：深棕，取自 `SushiBgDark` 系。
+ *
+ * 不用纯黑/深灰 —— 那是 Material 默认 Snackbar 的长相，压在满屏暖色寿司上
+ * 像是另一个 App 的控件。带棕调的深色与背景同宗，又足够暗以保证白字对比度。
+ *
+ * 0xF2 而非全不透明：透出一点下方棋盘，浮层感更明显，同时仍能读清文字。
+ */
+private val ToastBg = Color(0xF23A2318)
+
+/**
+ * 描边色：琥珀，取自 `SushiSecondary`（0xFFFFB347）。
+ *
+ * 描边是这次改版的关键 —— 没有它，深色块压在暖色背景上边界很脏；有了亮色
+ * 描边，浮层与背景之间有了清晰的分界，看着像一枚「牌子」而不是一团阴影。
+ */
+private val ToastBorder = Color(0xFFFFB347)
+
+/** 文字色：暖白。纯白配棕底偏冷，掺一点黄更协调。 */
+private val ToastText = Color(0xFFFFF6E8)
