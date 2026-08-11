@@ -101,6 +101,12 @@ android {
         }
         debug {
             isMinifyEnabled = false
+
+            // debug 包换独立包名，可与 release 包同机共存互不覆盖。
+            // 两者的 DataStore / 快照 / 历史记录也因此完全隔离 ——
+            // 调试时刷数据不会污染正在用的 release 存档。
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
         }
     }
 

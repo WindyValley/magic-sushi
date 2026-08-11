@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      debug 变体覆盖 app_name，让桌面图标能和 release 包区分开。
+      放在 src/debug/ 下由 AGP 自动合并覆盖 src/main/ 的同名资源 ——
+      不需要动主 strings.xml，也不会出现 duplicate resource 冲突。
+    -->
+    <string name="app_name">Magic Sushi (Debug)</string>
+</resources>
