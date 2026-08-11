@@ -9,8 +9,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -135,18 +139,22 @@ fun TopToast(
         ) {
             // 图标承担「这是什么事」的第一眼识别，比读完整句话快。
             //
-            // ⚠️ 用 `⇄`（U+21C4，箭头区）而不是 emoji `🔀`（U+1F500）。
-            // 后者在模拟器和部分低端机上字体覆盖不全，会降级成豆腐块 ——
-            // 实测在 API 34 模拟器上渲染成一个橙底白 X 的方块，看着像错误
-            // 提示而不是「重新排列」。
+            // ⚠️ 用矢量图而非字符。这里换过两轮：
+            //   1. `🔀`（U+1F500）—— 在 API 34 模拟器上降级成橙底白 X 方块，
+            //      看着像「关闭/错误」，与「已自动重排」的意思完全相反。
+            //   2. `⇄`（U+21C4）—— 字体覆盖比 emoji 好，但性质没变：
+            //      仍然赌用户系统有这个字形。定制 ROM、精简字体包、字体
+            //      子集化都可能缺，缺了就是豆腐块。
             //
-            // U+21C4 属于基础箭头区，字体覆盖远好于 emoji 平面，且它本身就是
-            // 「左右互换」的语义，比洗牌 emoji 更贴合「棋盘重排」。
-            Text(
-                text = "⇄",
-                color = ToastBorder,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
+            // `ImageVector` 的路径数据打进 APK，渲染不经过字体系统，任何
+            // 设备一致。`Refresh` 在 material-icons-core 里（随 material3
+            // 传递依赖），不增加依赖也不增加体积。
+            Icon(
+                imageVector = Icons.Filled.Refresh,
+                // 紧跟的文字已说明是什么事，重复念一遍是噪音。
+                contentDescription = null,
+                tint = ToastBorder,
+                modifier = Modifier.size(18.dp),
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(

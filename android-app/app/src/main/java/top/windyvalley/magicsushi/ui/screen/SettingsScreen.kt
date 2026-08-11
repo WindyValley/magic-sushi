@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -18,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -233,12 +235,16 @@ fun SettingsScreen(
                         fontSize = 16.sp,
                         modifier = Modifier.weight(1f),
                     )
-                    // 用 › 而非 emoji 箭头 —— 基础符号字体覆盖更稳
-                    // （TopToast 那里 🔀 降级成豆腐块踩过这个坑）。
-                    Text(
-                        text = "›",
-                        color = Color(0x99FFE8C5),
-                        fontSize = 20.sp,
+                    // 用矢量图而非字符 `›` —— 字符受系统字体限制，缺字形就是
+                    // 豆腐块；ImageVector 是 APK 自带的路径数据，任何设备一致。
+                    // KeyboardArrowRight 在 material-icons-core 里（与 ArrowBack
+                    // 同一批），不增加依赖也不增加体积。
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        // 整行的语义由「关于本作」承载，箭头只是装饰。
+                        contentDescription = null,
+                        tint = Color(0x99FFE8C5),
+                        modifier = Modifier.size(22.dp),
                     )
                 }
 

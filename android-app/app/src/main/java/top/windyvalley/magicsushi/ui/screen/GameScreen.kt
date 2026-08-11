@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -31,6 +32,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -134,11 +138,14 @@ fun GameScreen(
                 IconButton(
                     onClick = { viewModel.onPause() },
                 ) {
-                    Text(
-                        text = "❚❚",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 4.dp),
+                    // 用矢量图而非字符 `❚❚` —— 字符受系统字体限制（U+275A
+                    // 在精简字体包里常缺），矢量图打进 APK，任何设备一致。
+                    // core 里没有 Pause，暂停符号是两个矩形，手写最省。
+                    Icon(
+                        imageVector = PauseIcon,
+                        contentDescription = "暂停",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp),
                     )
                 }
 
@@ -175,9 +182,18 @@ fun GameScreen(
                             },
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(
-                            text = "🐞",
-                            color = Color.White.copy(alpha = 0.35f),
+                        // 用矢量图而非 emoji `🐞`。虽然这个入口只在 debug 包
+                        // 出现、字体缺失影响有限，但没有理由在这里破例 ——
+                        // 全 app 统一「图标即矢量图」，少一处例外就少一处
+                        // 将来照抄错模式的源头。
+                        //
+                        // 换用扳手（Build）而非虫子：语义是「调试工具」，
+                        // 比「有 bug」更准确。core 里就有，零成本。
+                        Icon(
+                            imageVector = Icons.Filled.Build,
+                            contentDescription = "调试：强制死局",
+                            tint = Color.White.copy(alpha = 0.35f),
+                            modifier = Modifier.size(18.dp),
                         )
                     }
                 }
@@ -339,3 +355,36 @@ fun GameScreen(
         )
     }
 }
+/**
+ * 暂停图标（两个竖条），手写路径数据。
+ *
+ * `material-icons-core` 里没有 Pause（它在 extended 包，那个 AAR 有几千个
+ * 图标，为一个符号引进来不划算）。暂停就是两个矩形，手写比加依赖省得多。
+ *
+ * 24x24 视口，与 Material 图标的栅格一致 —— 这样它和同一行的其他图标
+ * 视觉大小才匹配。
+ */
+private val PauseIcon: ImageVector = ImageVector.Builder(
+    name = "Pause",
+    defaultWidth = 24.dp,
+    defaultHeight = 24.dp,
+    viewportWidth = 24f,
+    viewportHeight = 24f,
+).apply {
+    path(fill = SolidColor(Color.White)) {
+        // 左竖条
+        moveTo(6f, 19f)
+        horizontalLineTo(10f)
+        verticalLineTo(5f)
+        horizontalLineTo(6f)
+        verticalLineTo(19f)
+        close()
+        // 右竖条
+        moveTo(14f, 5f)
+        verticalLineTo(19f)
+        horizontalLineTo(18f)
+        verticalLineTo(5f)
+        horizontalLineTo(14f)
+        close()
+    }
+}.build()
