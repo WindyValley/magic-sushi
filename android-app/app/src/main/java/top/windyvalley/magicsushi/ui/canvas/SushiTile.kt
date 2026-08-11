@@ -65,8 +65,15 @@ private const val DRAGGING_ALPHA = 0.7f
 /** Duration (ms) of the scale and drag-snap-back animations. */
 private const val ANIM_DURATION_MS = 150
 
-/** Duration (ms) of tile cascade animations (fade / fall / spawn). */
-private const val CASCADE_ANIM_MS = 100
+/**
+ * 级联动画（淡出 / 下落 / 生成）的时长，毫秒。**全 App 唯一定义处。**
+ *
+ * `GameViewModel.ANIM_PHASE_MS` 直接引用它 —— 两者必须相等：相位间隔短于
+ * 动画时长，位移动画会被下一帧打断；长于则寿司落定后干等。
+ *
+ * `internal` 而非 `private` 就是为了让 ViewModel 能引用，不用再写一个 100。
+ */
+internal const val CASCADE_ANIM_MS = 100
 
 /**
  * 下落用的加速曲线（重力感）。
@@ -83,16 +90,25 @@ private const val CASCADE_ANIM_MS = 100
 private val FallEasing = CubicBezierEasing(0.33f, 0f, 0.67f, 0.2f)
 
 /**
- * 重排动画时长（毫秒）。与 `ReshuffleAnimator.RESHUFFLE_ANIM_MS` 对齐。
+ * 重排动画时长（毫秒）。**全 App 唯一定义处。**
  *
- * ⚠️ 两处必须一致：engine 侧用它决定「什么时候推落定帧」，UI 侧用它跑位移
- * 动画。UI 比 engine 长会被落定帧打断（动画没跑完位移就归零），短则寿司
- * 到位后干等一段时间才响应操作。
+ * ## 为什么定义在 UI 层
  *
- * 没做成共享常量是因为 engine 模块不该被 UI 的观感参数绑住，但改动时
- * 必须同步 —— 这里留注释而不是留隐患。
+ * 这是个观感参数 —— 多久算「看得清但不拖沓」只有看着屏幕才能定。engine
+ * 不该被观感绑住，所以它不持有这个值，而是由 `playReshuffleAnimation` 的
+ * 必填参数接收。
+ *
+ * ## 为什么不给 engine 侧留默认值
+ *
+ * 留了默认值就等于在 engine 里又定义了一遍同一个含义的数字，两处迟早改漏
+ * （engine 推落定帧的时机与 UI 跑动画的时长不一致：UI 更长会被落定帧打断，
+ * 动画没跑完位移就归零；更短则寿司到位后干等一段才响应操作）。
+ *
+ * 现在 engine 侧是必填参数，漏传直接编译不过。
+ *
+ * `internal` 而非 `private`：ViewModel 要读它传给 engine。
  */
-private const val RESHUFFLE_ANIM_MS = 420
+internal const val RESHUFFLE_ANIM_MS = 420
 
 /**
  * 弧高与移动距离的比例。
@@ -272,8 +288,8 @@ fun SushiTile(
     // 注意 tile 在 frame 1 就已经渲染在**目标行**了，位移的作用是把它
     // 「往上推」到起点，动画到 0 的过程才是视觉上的下落。
     //
-    // 但相位间隔（ANIM_PHASE_MS = 100ms）与动画时长（CASCADE_ANIM_MS = 100ms）
-    // 相等，frame 2 到达时第一段动画往往还没跑完。此时 animateFloatAsState
+    // 但相位间隔与动画时长相等（ANIM_PHASE_MS 直接引用 CASCADE_ANIM_MS，
+    // 所以恒等），frame 2 到达时第一段动画往往还没跑完。此时 animateFloatAsState
     // 看到 targetValue 从 -落差 突变为 0，会**从当前值重新起跑一段新动画** ——
     // 而当前值是个中间量，于是 tile 先往上跳回一点再落下。那就是回弹。
     //

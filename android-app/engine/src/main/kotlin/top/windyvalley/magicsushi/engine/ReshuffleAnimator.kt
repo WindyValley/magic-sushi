@@ -31,15 +31,6 @@ import kotlinx.coroutines.delay
 object ReshuffleAnimator {
 
     /**
-     * 重排动画的时长（毫秒）。
-     *
-     * 比级联的 `CASCADE_ANIM_MS`（100ms）长得多 —— 重排是全盘 49 个 tile
-     * 同时长距离移动，太快会糊成一团看不出「是这些寿司自己重新排列了」，
-     * 而那正是这个动画要传达的信息。
-     */
-    const val RESHUFFLE_ANIM_MS = 420L
-
-    /**
      * 生成重排的两帧。
      *
      * @param fromBoard 重排前的棋盘（用于取每个 tile 的旧位置）
@@ -136,6 +127,15 @@ object ReshuffleAnimator {
  * 在移动还没跑完时到达，`SushiTile` 看到位移变 0 会中断当前动画 —— 就是
  * `SushiTile.kt` 里记着的那个「两级 tween 串联导致回弹」的坑。
  *
+ * @param animMs         位移动画时长。**必填，无默认值。**
+ *
+ *                       故意不给默认值：这个数字的唯一定义处在 UI 层
+ *                       （`SushiTile.kt` 的 `RESHUFFLE_ANIM_MS`），因为
+ *                       「多久算看得清但不拖沓」是观感问题。engine 留默认值
+ *                       等于把同一个含义的数字定义两遍，两处迟早改漏 ——
+ *                       而改漏的表现很隐蔽：engine 短了则动画被落定帧打断
+ *                       （位移没跑完就归零），长了则寿司到位后干等一段才
+ *                       响应操作。漏传直接编译不过，比注释可靠。
  * @param shouldContinue 代际守卫。restart / 超时后返回 false，动画中止。
  * @param onFrame        把「棋盘 + 帧」推给渲染层。
  */
@@ -143,7 +143,7 @@ suspend fun playReshuffleAnimation(
     fromBoard: Board,
     toBoard: Board,
     origin: Map<Pair<Int, Int>, Pair<Int, Int>>,
-    animMs: Long = ReshuffleAnimator.RESHUFFLE_ANIM_MS,
+    animMs: Long,
     shouldContinue: () -> Boolean = { true },
     onFrame: (board: Board?, frame: AnimFrame) -> Unit,
 ) {

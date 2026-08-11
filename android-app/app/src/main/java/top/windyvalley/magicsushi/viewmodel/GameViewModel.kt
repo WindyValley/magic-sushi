@@ -41,6 +41,8 @@ import top.windyvalley.magicsushi.engine.SwapResult
 import top.windyvalley.magicsushi.engine.TimerEngine
 import top.windyvalley.magicsushi.engine.playCascadeAnimation
 import top.windyvalley.magicsushi.engine.playReshuffleAnimation
+import top.windyvalley.magicsushi.ui.canvas.CASCADE_ANIM_MS
+import top.windyvalley.magicsushi.ui.canvas.RESHUFFLE_ANIM_MS
 
 /**
  * GameViewModel.kt — UI state coordinator for Magic Sushi.
@@ -930,7 +932,26 @@ class GameViewModel(
     // Animation constants (per T-ANIM-001: 3 phases × 100ms, gaps 100ms)
     // ========================================================================
     private companion object {
-        const val ANIM_PHASE_MS = 100L
+        /**
+         * 每个级联阶段的时长。
+         *
+         * 直接引用 UI 层的 [CASCADE_ANIM_MS] 而不是再写一个 100 ——
+         * 这两个数必须相等：相位间隔短于动画时长，`SushiTile` 的位移动画
+         * 会被下一帧打断（那就是「落地后弹一下」的成因之一）；长于则
+         * 寿司落定后干等一段才播下一阶段。
+         *
+         * 曾经是两处各写 100L / 100，靠 SushiTile 里一句注释「两者相等」
+         * 维系 —— 改一处漏一处的表现是动画节奏错乱，很难定位到常量不同步。
+         */
+        val ANIM_PHASE_MS = CASCADE_ANIM_MS.toLong()
+
+        /**
+         * 级联轮次之间的间歇。
+         *
+         * 与 [ANIM_PHASE_MS] 恰好相等纯属巧合（都是 100ms），语义无关 ——
+         * 一个是「动画播多久」，一个是「两轮之间停多久」。所以刻意不复用
+         * 同一个常量：将来调节奏时它们该能各自变化。
+         */
         const val ANIM_GAP_MS = 100L
     }
 
@@ -1318,6 +1339,8 @@ class GameViewModel(
             fromBoard = fromBoard,
             toBoard = reshuffle.board,
             origin = reshuffle.origin,
+            // 时长的唯一定义处在 UI 层 —— engine 不持有这个观感参数。
+            animMs = RESHUFFLE_ANIM_MS.toLong(),
             shouldContinue = { generation == roundGeneration },
             onFrame = { board, frame ->
                 if (generation != roundGeneration) return@playReshuffleAnimation
