@@ -1,6 +1,8 @@
 package top.windyvalley.magicsushi.ui.screen
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -46,6 +48,7 @@ import top.windyvalley.magicsushi.engine.RoundExitOptions
 import top.windyvalley.magicsushi.ui.canvas.GameCanvas
 import top.windyvalley.magicsushi.ui.component.TopToast
 import top.windyvalley.magicsushi.ui.theme.SushiBgDark
+import top.windyvalley.magicsushi.ui.theme.SushiSecondary
 import top.windyvalley.magicsushi.viewmodel.GameViewModel
 
 /**
@@ -128,81 +131,118 @@ fun GameScreen(
                 .padding(horizontal = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // 顶部行：暂停按钮 + TimerDisplay
-            Row(
+            // 顶部行：倒计时居屏幕正中，暂停 + 调试入口浮在左侧。
+            //
+            // ## 为什么用 Box 而不是 Row
+            //
+            // 原本是 `Row { 暂停按钮; Spacer(8dp); TimerDisplay(weight(1f)) }`
+            // —— 计时器拿到的是「暂停按钮右侧的剩余宽度」并在其中居中，于是
+            // 数字落在剩余空间的中点而非屏幕中点，右偏约半个按钮宽。既不居中
+            // 也不靠边，看着像没对齐。
+            //
+            // Box 把两者解耦：计时器相对**整个屏幕宽度**居中，左侧控件叠在
+            // 它上面用 align 钉住，不参与宽度计算。以后左边再加控件也不会
+            // 推动数字。
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 4.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                contentAlignment = Alignment.Center,
             ) {
-                IconButton(
-                    onClick = { viewModel.onPause() },
-                ) {
-                    // 用矢量图而非字符 `❚❚` —— 字符受系统字体限制（U+275A
-                    // 在精简字体包里常缺），矢量图打进 APK，任何设备一致。
-                    // core 里没有 Pause，暂停符号是两个矩形，手写最省。
-                    Icon(
-                        imageVector = PauseIcon,
-                        contentDescription = "暂停",
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-
-                // 调试入口：长按 🐞 强制造死局并立刻重排。
-                //
-                // ## 关于「release 包里有没有这段代码」
-                //
-                // `BuildConfig.DEBUG` 是编译期常量，release 下这个分支**永不
-                // 执行**。但本项目 `isMinifyEnabled = false`（见 build.gradle.kts
-                // 的说明：混淆需要单独一轮序列化验证，尚未做），所以 R8 不运行，
-                // 方法体和 `DeadlockEngine.forceDeadlock` 的引用**仍然在 APK 里**。
-                //
-                // 已用 dexdump 核实：release 的 classes2.dex 里 `forceDeadlock`
-                // 和 `debugForceDeadlock` 两个方法都存在。
-                //
-                // 这可以接受 —— 玩家碰不到这个入口（分支不执行），多出的死代码
-                // 不到 1KB。等哪天开启 minify，它们会自动被消除。
-                //
-                // ⚠️ 不要因为「反正 R8 会删」就往这里塞敏感逻辑，当前它不会删。
-                //
-                // ## 为什么不用 combinedClickable
-                //
-                // 它需要 `@OptIn(ExperimentalFoundationApi)`，而本项目此前零处
-                // opt-in —— 不为一个调试入口引入第一个实验 API 依赖。
-                // `detectTapGestures` 是稳定 API。
-                if (BuildConfig.DEBUG) {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .pointerInput(Unit) {
-                                detectTapGestures(
-                                    onLongPress = { viewModel.debugForceDeadlock() },
-                                )
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        // 用矢量图而非 emoji `🐞`。虽然这个入口只在 debug 包
-                        // 出现、字体缺失影响有限，但没有理由在这里破例 ——
-                        // 全 app 统一「图标即矢量图」，少一处例外就少一处
-                        // 将来照抄错模式的源头。
-                        //
-                        // 换用扳手（Build）而非虫子：语义是「调试工具」，
-                        // 比「有 bug」更准确。core 里就有，零成本。
-                        Icon(
-                            imageVector = Icons.Filled.Build,
-                            contentDescription = "调试：强制死局",
-                            tint = Color.White.copy(alpha = 0.35f),
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(8.dp))
                 TimerDisplay(
                     remainingSeconds = state.remainingSeconds,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
                 )
+
+                // 左侧控件组，叠在计时器之上钉在左边。
+                Row(
+                    modifier = Modifier.align(Alignment.CenterStart),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(
+                        onClick = { viewModel.onPause() },
+                        modifier = Modifier
+                            .size(PAUSE_BUTTON_DP.dp)
+                            .background(PauseButtonBg, CircleShape)
+                            .border(PAUSE_BORDER_DP.dp, SushiSecondary, CircleShape),
+                    ) {
+                        // 用矢量图而非字符 `❚❚` —— 字符受系统字体限制（U+275A
+                        // 在精简字体包里常缺），矢量图打进 APK，任何设备一致。
+                        // core 里没有 Pause，暂停符号是两个矩形，手写最省。
+                        //
+                        // ## 尺寸为什么回到 24dp
+                        //
+                        // 加背景圆之前一路调到 32dp 才勉强够看（20 → 28 → 32）
+                        // —— 那时「显眼」全靠图标本身的白色面积去顶。
+                        //
+                        // 有了背景圆之后，承担存在感的是整个 48dp 的圆（底色 +
+                        // 琥珀描边），图标反而该缩回 Material 标准的 24dp 留
+                        // 呼吸空间：48dp 圆的内切正方形约 34dp，24dp 图标四周
+                        // 各留 5dp，不顶描边。
+                        //
+                        // 图标继续放大反而更糟：贴着描边会让圆看起来被撑破。
+                        Icon(
+                            imageVector = PauseIcon,
+                            contentDescription = "暂停",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+
+                    // 调试入口：长按扳手强制造死局并立刻重排。
+                    //
+                    // ## 关于「release 包里有没有这段代码」
+                    //
+                    // `BuildConfig.DEBUG` 是编译期常量，release 下这个分支
+                    // **永不执行**。但本项目 `isMinifyEnabled = false`（见
+                    // build.gradle.kts 的说明：混淆需要单独一轮序列化验证，
+                    // 尚未做），所以 R8 不运行，方法体和
+                    // `DeadlockEngine.forceDeadlock` 的引用**仍然在 APK 里**。
+                    //
+                    // 已用 dexdump 核实：release 的 classes2.dex 里
+                    // `forceDeadlock` 和 `debugForceDeadlock` 两个方法都存在。
+                    //
+                    // 这可以接受 —— 玩家碰不到这个入口（分支不执行），多出的
+                    // 死代码不到 1KB。等哪天开启 minify，它们会自动被消除。
+                    //
+                    // ⚠️ 不要因为「反正 R8 会删」就往这里塞敏感逻辑，当前它
+                    // 不会删。
+                    //
+                    // ## 为什么不用 combinedClickable
+                    //
+                    // 它需要 `@OptIn(ExperimentalFoundationApi)`，而本项目此前
+                    // 零处 opt-in —— 不为一个调试入口引入第一个实验 API 依赖。
+                    // `detectTapGestures` 是稳定 API。
+                    if (BuildConfig.DEBUG) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .pointerInput(Unit) {
+                                    detectTapGestures(
+                                        onLongPress = { viewModel.debugForceDeadlock() },
+                                    )
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            // 用矢量图而非 emoji `🐞`。虽然这个入口只在 debug
+                            // 包出现、字体缺失影响有限，但没有理由在这里破例
+                            // —— 全 app 统一「图标即矢量图」，少一处例外就少
+                            // 一处将来照抄错模式的源头。
+                            //
+                            // 换用扳手（Build）而非虫子：语义是「调试工具」，
+                            // 比「有 bug」更准确。core 里就有，零成本。
+                            //
+                            // 刻意**不加**背景圆：它 alpha 0.35 就是要低调，
+                            // 加背景等于把调试功能提到与暂停按钮同级。
+                            Icon(
+                                imageVector = Icons.Filled.Build,
+                                contentDescription = "调试：强制死局",
+                                tint = Color.White.copy(alpha = 0.35f),
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -355,6 +395,32 @@ fun GameScreen(
         )
     }
 }
+/**
+ * 暂停按钮的直径。
+ *
+ * 48dp = Material 的最小交互尺寸。这里让**可见圆与触摸区重合**，而不是
+ * 画一个更小的圆再靠透明内边距凑触摸区 —— 那样玩家会点到圆外的空白却
+ * 触发暂停，或者以为点了没反应（实际点在了描边外的透明区）。
+ *
+ * 试过 44dp（iOS HIG 的下限）：显式给 `IconButton` 传 44dp 会把它默认的
+ * 48dp 触摸区一起缩掉，低于 Material 无障碍下限，不值得为 4dp 观感让步。
+ */
+private const val PAUSE_BUTTON_DP = 48
+
+/** 描边宽度。与 Toast 的 2dp 一致 —— 同一套视觉语言。 */
+private const val PAUSE_BORDER_DP = 2
+
+/**
+ * 暂停按钮底色：比背景稍亮的半透明棕。
+ *
+ * 取 `0x66` alpha 而非实心：实心色块在满屏暖色棋盘上方会像一个「贴上去的
+ * 补丁」，半透明让它读起来是背景的一部分被提亮，而不是另一层。
+ *
+ * 色相与 `ToastBg`（`0xF23A2318`）同源 —— 提示条和暂停按钮是这个界面上
+ * 唯二的浮层控件，共用一套配色才不像拼凑的。
+ */
+private val PauseButtonBg = Color(0x663A2318)
+
 /**
  * 暂停图标（两个竖条），手写路径数据。
  *
