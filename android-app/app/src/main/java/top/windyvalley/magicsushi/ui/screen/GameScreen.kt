@@ -196,9 +196,8 @@ fun GameScreen(
             // 之前棋盘紧贴顶部行，整体偏上，屏幕下方留一大片空白 —— 顶部弹出的
             // 提示离棋盘太远，视线在棋盘上时不容易注意到。
             //
-            // 用 weight 而不是固定 dp：不同屏幕比例下都能保持棋盘居中偏下，
-            // 写死 dp 在短屏上会把棋盘挤出可视区。上下 1:2 让棋盘略微偏上于
-            // 正中，给底部得分区留出呼吸空间。
+            // 用 weight 而不是固定 dp：不同屏幕比例下都能保持棋盘位置稳定，
+            // 写死 dp 在短屏上会把棋盘挤出可视区。
             Spacer(modifier = Modifier.weight(1f))
 
             // 中间棋盘
@@ -210,7 +209,14 @@ fun GameScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            Spacer(modifier = Modifier.weight(2f))
+            // 棋盘与得分卡之间是固定间距，不是 weight。
+            //
+            // 得分卡要「跟着棋盘」而不是「贴着屏幕底」—— 它显示的是这一局的
+            // 即时状态，属于棋盘的一部分，离远了要移动视线才能看到分数变化。
+            //
+            // 曾经这里是 `weight(2f)`：棋盘上方 1 份、下方 2 份，得分卡被挤到
+            // 屏幕最下缘。那样棋盘确实居中偏上，但得分卡看着像被遗弃在角落。
+            Spacer(modifier = Modifier.height(20.dp))
 
             // 底部：得分 + 静音
             ScoreOverlay(
@@ -219,7 +225,13 @@ fun GameScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            // 剩余空间全部收在得分卡下方。
+            //
+            // 与上方的 weight(1f) 配合，「棋盘 + 得分卡」作为一个整体在竖直
+            // 方向居中偏上：上方 1 份、下方 2 份。这样棋盘位置与改动前基本
+            // 一致（原来也是 1:2，只是得分卡在那 2 份的另一侧），而得分卡
+            // 现在紧跟棋盘。
+            Spacer(modifier = Modifier.weight(2f))
         }
 
         // 顶部浮出提示。
