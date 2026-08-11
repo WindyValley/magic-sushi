@@ -46,6 +46,7 @@ class BoardPresentationTest {
                 type = SushiType.SUSHI1,
                 alpha = 0.5f,
                 offsetY = 0f,
+                offsetX = 0f,
                 scale = 1f,
                 anim = AnimationEngine.TileAnim.FadingOut,
             ),

@@ -1,6 +1,7 @@
 package top.windyvalley.magicsushi.ui.screen
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -23,18 +25,26 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import top.windyvalley.magicsushi.BuildConfig
+import top.windyvalley.magicsushi.engine.GameEvent
 import top.windyvalley.magicsushi.engine.GamePhase
 import top.windyvalley.magicsushi.engine.GameState
 import top.windyvalley.magicsushi.engine.RoundExitOptions
 import top.windyvalley.magicsushi.ui.canvas.GameCanvas
+import top.windyvalley.magicsushi.ui.component.TopToast
 import top.windyvalley.magicsushi.ui.theme.SushiBgDark
 import top.windyvalley.magicsushi.viewmodel.GameViewModel
 
@@ -76,6 +86,25 @@ fun GameScreen(
     // onPause()。这里没有对应风险：确认弹窗没有任何 VM 侧的对偶状态。）
     var showExitConfirm by remember { mutableStateOf(false) }
 
+    // 死局自动重排提示。
+    //
+    // 从 Toast 改成自绘顶部浮层：Toast 的位置由系统决定（屏幕下方），棋盘
+    // 下移后视线在中部偏下，Toast 在更下方弹出容易被忽略。
+    //
+    // 订阅 events 而非读 state 字段 —— 这是瞬时通知，连续两次重排必须提示
+    // 两次，而 state 字段在「同一个 true 连续赋值」时不会触发重组。
+    var toastMessage by remember { mutableStateOf<String?>(null) }
+    var toastToken by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) {
+        viewModel.events.collect { event ->
+            if (event is GameEvent.BoardReshuffled) {
+                toastMessage = "局面无解，已自动重排"
+                // 递增 token 让 TopToast 知道「这是新的一次」，即使文字相同。
+                toastToken++
+            }
+        }
+    }
+
     // 离开暂停态时复位。
     //
     // 不复位会残留：玩家打开确认弹窗 → 切后台 → ON_STOP 存快照 → 回到前台
@@ -109,13 +138,66 @@ fun GameScreen(
                 IconButton(
                     onClick = { viewModel.onPause() },
                 ) {
-                    Text(
-                        text = "❚❚",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 4.dp),
+                    // 用矢量图而非字符 `❚❚` —— 字符受系统字体限制（U+275A
+                    // 在精简字体包里常缺），矢量图打进 APK，任何设备一致。
+                    // core 里没有 Pause，暂停符号是两个矩形，手写最省。
+                    Icon(
+                        imageVector = PauseIcon,
+                        contentDescription = "暂停",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp),
                     )
                 }
+
+                // 调试入口：长按 🐞 强制造死局并立刻重排。
+                //
+                // ## 关于「release 包里有没有这段代码」
+                //
+                // `BuildConfig.DEBUG` 是编译期常量，release 下这个分支**永不
+                // 执行**。但本项目 `isMinifyEnabled = false`（见 build.gradle.kts
+                // 的说明：混淆需要单独一轮序列化验证，尚未做），所以 R8 不运行，
+                // 方法体和 `DeadlockEngine.forceDeadlock` 的引用**仍然在 APK 里**。
+                //
+                // 已用 dexdump 核实：release 的 classes2.dex 里 `forceDeadlock`
+                // 和 `debugForceDeadlock` 两个方法都存在。
+                //
+                // 这可以接受 —— 玩家碰不到这个入口（分支不执行），多出的死代码
+                // 不到 1KB。等哪天开启 minify，它们会自动被消除。
+                //
+                // ⚠️ 不要因为「反正 R8 会删」就往这里塞敏感逻辑，当前它不会删。
+                //
+                // ## 为什么不用 combinedClickable
+                //
+                // 它需要 `@OptIn(ExperimentalFoundationApi)`，而本项目此前零处
+                // opt-in —— 不为一个调试入口引入第一个实验 API 依赖。
+                // `detectTapGestures` 是稳定 API。
+                if (BuildConfig.DEBUG) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .pointerInput(Unit) {
+                                detectTapGestures(
+                                    onLongPress = { viewModel.debugForceDeadlock() },
+                                )
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        // 用矢量图而非 emoji `🐞`。虽然这个入口只在 debug 包
+                        // 出现、字体缺失影响有限，但没有理由在这里破例 ——
+                        // 全 app 统一「图标即矢量图」，少一处例外就少一处
+                        // 将来照抄错模式的源头。
+                        //
+                        // 换用扳手（Build）而非虫子：语义是「调试工具」，
+                        // 比「有 bug」更准确。core 里就有，零成本。
+                        Icon(
+                            imageVector = Icons.Filled.Build,
+                            contentDescription = "调试：强制死局",
+                            tint = Color.White.copy(alpha = 0.35f),
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+
                 Spacer(modifier = Modifier.width(8.dp))
                 TimerDisplay(
                     remainingSeconds = state.remainingSeconds,
@@ -124,6 +206,15 @@ fun GameScreen(
             }
 
             Spacer(modifier = Modifier.height(8.dp))
+
+            // 顶部行与棋盘之间的弹性空隙。
+            //
+            // 之前棋盘紧贴顶部行，整体偏上，屏幕下方留一大片空白 —— 顶部弹出的
+            // 提示离棋盘太远，视线在棋盘上时不容易注意到。
+            //
+            // 用 weight 而不是固定 dp：不同屏幕比例下都能保持棋盘位置稳定，
+            // 写死 dp 在短屏上会把棋盘挤出可视区。
+            Spacer(modifier = Modifier.weight(1f))
 
             // 中间棋盘
             GameCanvas(
@@ -134,7 +225,14 @@ fun GameScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            // 棋盘与得分卡之间是固定间距，不是 weight。
+            //
+            // 得分卡要「跟着棋盘」而不是「贴着屏幕底」—— 它显示的是这一局的
+            // 即时状态，属于棋盘的一部分，离远了要移动视线才能看到分数变化。
+            //
+            // 曾经这里是 `weight(2f)`：棋盘上方 1 份、下方 2 份，得分卡被挤到
+            // 屏幕最下缘。那样棋盘确实居中偏上，但得分卡看着像被遗弃在角落。
+            Spacer(modifier = Modifier.height(20.dp))
 
             // 底部：得分 + 静音
             ScoreOverlay(
@@ -142,7 +240,27 @@ fun GameScreen(
                 highScore = state.highScore,
                 modifier = Modifier.fillMaxWidth(),
             )
+
+            // 剩余空间全部收在得分卡下方。
+            //
+            // 与上方的 weight(1f) 配合，「棋盘 + 得分卡」作为一个整体在竖直
+            // 方向居中偏上：上方 1 份、下方 2 份。这样棋盘位置与改动前基本
+            // 一致（原来也是 1:2，只是得分卡在那 2 份的另一侧），而得分卡
+            // 现在紧跟棋盘。
+            Spacer(modifier = Modifier.weight(2f))
         }
+
+        // 顶部浮出提示。
+        //
+        // 放在 Column 之后、同一个 Box 内 —— Box 里后声明的在上层，所以它
+        // 浮在棋盘上方而不被遮住。挂在 Box 上而非 Column 里，是为了不参与
+        // Column 的垂直排布（否则提示出现/消失会把棋盘顶来顶去）。
+        TopToast(
+            message = toastMessage,
+            token = toastToken,
+            onDismiss = { toastMessage = null },
+            modifier = Modifier.padding(top = 56.dp),
+        )
     }
 
     // 暂停对话框：phase == PAUSED 是唯一判据。
@@ -237,3 +355,36 @@ fun GameScreen(
         )
     }
 }
+/**
+ * 暂停图标（两个竖条），手写路径数据。
+ *
+ * `material-icons-core` 里没有 Pause（它在 extended 包，那个 AAR 有几千个
+ * 图标，为一个符号引进来不划算）。暂停就是两个矩形，手写比加依赖省得多。
+ *
+ * 24x24 视口，与 Material 图标的栅格一致 —— 这样它和同一行的其他图标
+ * 视觉大小才匹配。
+ */
+private val PauseIcon: ImageVector = ImageVector.Builder(
+    name = "Pause",
+    defaultWidth = 24.dp,
+    defaultHeight = 24.dp,
+    viewportWidth = 24f,
+    viewportHeight = 24f,
+).apply {
+    path(fill = SolidColor(Color.White)) {
+        // 左竖条
+        moveTo(6f, 19f)
+        horizontalLineTo(10f)
+        verticalLineTo(5f)
+        horizontalLineTo(6f)
+        verticalLineTo(19f)
+        close()
+        // 右竖条
+        moveTo(14f, 5f)
+        verticalLineTo(19f)
+        horizontalLineTo(18f)
+        verticalLineTo(5f)
+        horizontalLineTo(14f)
+        close()
+    }
+}.build()

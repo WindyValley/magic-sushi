@@ -154,6 +154,7 @@ object AnimationEngine {
                                 type = tile.type,
                                 alpha = 0f,
                                 offsetY = 0f,
+                                offsetX = 0f,
                                 scale = 1f,
                                 anim = TileAnim.FadingOut,
                             ),
@@ -167,6 +168,7 @@ object AnimationEngine {
                                 type = tile.type,
                                 alpha = 1f,
                                 offsetY = 0f,
+                                offsetX = 0f,
                                 scale = 1f,
                                 anim = TileAnim.Stable,
                             ),
@@ -252,6 +254,7 @@ object AnimationEngine {
                                 type = tile.type,
                                 alpha = 1f,
                                 offsetY = offsetY,
+                                offsetX = 0f,
                                 scale = 1f,
                                 anim = TileAnim.Falling(origRow, row),
                             ),
@@ -265,6 +268,7 @@ object AnimationEngine {
                                 type = tile.type,
                                 alpha = 1f,
                                 offsetY = 0f,
+                                offsetX = 0f,
                                 scale = 1f,
                                 anim = TileAnim.Stable,
                             ),
@@ -292,6 +296,7 @@ object AnimationEngine {
                                 type = tile.type,
                                 alpha = 1f,
                                 offsetY = 0f,
+                                offsetX = 0f,
                                 scale = 1f,
                                 anim = TileAnim.Stable,
                             ),
@@ -305,6 +310,7 @@ object AnimationEngine {
                                 type = tile.type,
                                 alpha = 1f,
                                 offsetY = 0f,
+                                offsetX = 0f,
                                 scale = 1f,
                                 anim = TileAnim.Stable,
                             ),
@@ -375,6 +381,7 @@ object AnimationEngine {
                             //
                             // ⚠️ UI 消费时取负，转换在 SushiTile。
                             offsetY = (row - spawnFromRow).toFloat(),
+                            offsetX = 0f,
                             scale = 1f,
                             anim = TileAnim.SpawningIn(spawnFromRow),
                         ),
@@ -402,6 +409,7 @@ object AnimationEngine {
                         type = tile.type,
                         alpha = 1f,
                         offsetY = 0f,
+                        offsetX = 0f,
                         scale = 1f,
                         anim = TileAnim.Stable,
                     ),
@@ -435,6 +443,21 @@ object AnimationEngine {
          */
         data class SpawningIn(val spawnFromRow: Int) : TileAnim()
 
+        /**
+         * 死局重排：tile 从 ([fromRow], [fromCol]) 搬到当前格。
+         *
+         * 与 [Falling] 的区别是**二维** —— 重排后每个 tile 可能横竖都动，
+         * 而下落只有垂直方向。所以 [TileRenderState.offsetX] 只在这个
+         * anim 下会非 0。
+         *
+         * 语义与 Falling 一致：tile 已经渲染在**目标格**，位移把它推回起点，
+         * 动画到 0 的过程才是视觉上的移动。
+         */
+        data class Reshuffling(
+            val fromRow: Int,
+            val fromCol: Int,
+        ) : TileAnim()
+
         /** Tile is idle — no animation. */
         object Stable : TileAnim()
     }
@@ -459,6 +482,13 @@ object AnimationEngine {
      * @property offsetY  Fractional row offset for falling/spawning.
      *                     `0f` = at rest; positive = displaced downward
      *                     by this many rows.
+     * @property offsetX  Fractional column offset，仅重排用。
+     *                     `0f` = 静止；正值 = 相对静止位置向右偏移几列。
+     *                     符号约定与 [offsetY] 一致（正=右/下）。
+     *
+     *                     刻意**不给默认值** —— 加字段时让编译器把每个构造点
+     *                     都报出来，逐一确认该填什么。给了默认值就会静默漏掉
+     *                     本该填非 0 的地方，那种 bug 只能靠肉眼看动画发现。
      * @property scale    Scale factor. `1f` = normal.
      * @property anim     The animation intent for this frame.
      */
@@ -467,6 +497,7 @@ object AnimationEngine {
         val type: SushiType,
         val alpha: Float,
         val offsetY: Float,
+        val offsetX: Float,
         val scale: Float,
         val anim: TileAnim,
     )

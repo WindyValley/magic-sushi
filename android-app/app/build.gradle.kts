@@ -42,6 +42,13 @@ android {
         // 但 SemVer 的 1.0.0 表达的是**承诺**而不是功能量：
         // 见 semver.org 第 5 条 —— "1.0.0 版本定义了公共 API"。
         //
+        // v1.1.0 为什么是 MINOR：新增了关于页（独立屏幕 + 设置页入口），
+        // 玩家多了一件能做的事 —— 按 v0.2.0 的同一判据（新增设置页面属于
+        // 向后兼容的新功能）。
+        //
+        // 同版还修了死局卡死（自动重排 + 弧线动画），那部分性质是修缺陷；
+        // 一版里既有新功能又有缺陷修复时取较高的那级，所以是 MINOR 不是 PATCH。
+        //
         // v0.2.1 为什么是 PATCH 而不是 MINOR：只换了图标资源（全套 mipmap
         // 密度 + 首次补上自适应图标），玩家能做的事一件没变。自适应图标虽然
         // 是"新增能力"，但它修的是旧图标在圆形遮罩下缺角、以及小字号渲染
@@ -49,8 +56,8 @@ android {
         //
         // v0.2.0 当时为什么是 MINOR：v0.1.1 之后新增了设置页面（静音开关
         // 首次有 UI 入口、清空历史记录、关于），是向后兼容的新功能。
-        versionCode = 5
-        versionName = "1.0.0"
+        versionCode = 6
+        versionName = "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -101,6 +108,12 @@ android {
         }
         debug {
             isMinifyEnabled = false
+
+            // debug 包换独立包名，可与 release 包同机共存互不覆盖。
+            // 两者的 DataStore / 快照 / 历史记录也因此完全隔离 ——
+            // 调试时刷数据不会污染正在用的 release 存档。
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
         }
     }
 

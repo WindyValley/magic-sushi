@@ -211,6 +211,7 @@ fun GameCanvas(
                     tileAnim = renderState.anim,
                     // 直接用 engine 算好的偏移，不在这里从 tileAnim 反推。
                     offsetYCells = renderState.offsetY,
+                    offsetXCells = renderState.offsetX,
                 )
             }
             // 无动画：直接读棋盘，身份同样是 tile.id。
@@ -248,6 +249,7 @@ fun GameCanvas(
                     isDragging = isDragging,
                     tileAnim = slot.tileAnim,
                     offsetYCells = slot.offsetYCells,
+                    offsetXCells = slot.offsetXCells,
                     onClick = { onTileTap(row, col) },
                     onDragStart = { draggingTile = row to col },
                     onDragEnd = { _, toOffset, cs ->
@@ -320,4 +322,20 @@ private data class TileSlot(
      * 实际要落 5 格，UI 只让它落了 3 格 —— 起点还在棋盘内。
      */
     val offsetYCells: Float,
+    /**
+     * 横向位移，单位**格数**，由 engine 算好。仅重排动画非零。
+     *
+     * ## 符号约定与 offsetYCells 不同
+     *
+     * 这个是「来源格 - 目标格」的差值：负值表示起点在目标格**左边**。
+     * 消费时**不取负**，直接就是 Compose 需要的方向。
+     *
+     * 而 [offsetYCells] 是「往下落了几格」的正值领域语义，消费时要取负。
+     * 两套口径并存看着别扭，但各自都对：下落是物理运动（engine 描述
+     * 「落了多远」），重排是位置置换（engine 描述「从哪来」）。
+     *
+     * 重排的 Y 分量也走这一套 —— 见 `ReshuffleAnimator.generateFrames`，
+     * 它给 offsetY 填的同样是 `source.row - row`，与这里同源。
+     */
+    val offsetXCells: Float = 0f,
 )

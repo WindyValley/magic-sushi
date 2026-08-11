@@ -1,6 +1,7 @@
 package top.windyvalley.magicsushi.ui.canvas
 
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -28,7 +29,10 @@ import androidx.compose.ui.unit.IntOffset
 import top.windyvalley.magicsushi.R
 import top.windyvalley.magicsushi.engine.AnimationEngine
 import top.windyvalley.magicsushi.engine.SushiType
+import kotlin.math.PI
 import kotlin.math.roundToInt
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
  * Mapping from [SushiType] enum to drawable resource ids.
@@ -61,8 +65,15 @@ private const val DRAGGING_ALPHA = 0.7f
 /** Duration (ms) of the scale and drag-snap-back animations. */
 private const val ANIM_DURATION_MS = 150
 
-/** Duration (ms) of tile cascade animations (fade / fall / spawn). */
-private const val CASCADE_ANIM_MS = 100
+/**
+ * 级联动画（淡出 / 下落 / 生成）的时长，毫秒。**全 App 唯一定义处。**
+ *
+ * `GameViewModel.ANIM_PHASE_MS` 直接引用它 —— 两者必须相等：相位间隔短于
+ * 动画时长，位移动画会被下一帧打断；长于则寿司落定后干等。
+ *
+ * `internal` 而非 `private` 就是为了让 ViewModel 能引用，不用再写一个 100。
+ */
+internal const val CASCADE_ANIM_MS = 100
 
 /**
  * 下落用的加速曲线（重力感）。
@@ -77,6 +88,43 @@ private const val CASCADE_ANIM_MS = 100
  * 消失是视觉过渡，不是物理运动，加速反而显得突兀。
  */
 private val FallEasing = CubicBezierEasing(0.33f, 0f, 0.67f, 0.2f)
+
+/**
+ * 重排动画时长（毫秒）。**全 App 唯一定义处。**
+ *
+ * ## 为什么定义在 UI 层
+ *
+ * 这是个观感参数 —— 多久算「看得清但不拖沓」只有看着屏幕才能定。engine
+ * 不该被观感绑住，所以它不持有这个值，而是由 `playReshuffleAnimation` 的
+ * 必填参数接收。
+ *
+ * ## 为什么不给 engine 侧留默认值
+ *
+ * 留了默认值就等于在 engine 里又定义了一遍同一个含义的数字，两处迟早改漏
+ * （engine 推落定帧的时机与 UI 跑动画的时长不一致：UI 更长会被落定帧打断，
+ * 动画没跑完位移就归零；更短则寿司到位后干等一段才响应操作）。
+ *
+ * 现在 engine 侧是必填参数，漏传直接编译不过。
+ *
+ * `internal` 而非 `private`：ViewModel 要读它传给 engine。
+ */
+internal const val RESHUFFLE_ANIM_MS = 420
+
+/**
+ * 弧高与移动距离的比例。
+ *
+ * 0.18 大约是「明显看得出是弧线，但不至于绕远路」的量。调大到 0.3 以上会
+ * 让寿司划出夸张的大圈，短距离移动尤其明显；小于 0.1 则几乎看不出弯。
+ */
+private const val ARC_RATIO = 0.18f
+
+/**
+ * 重排的缓动曲线。
+ *
+ * 用 `FastOutSlowIn` 而非下落那条 [FallEasing]：下落要表现重力加速（越落
+ * 越快），重排是「被一只手拿起来放到别处」，起步快、临近落点减速更贴合。
+ */
+private val ReshuffleEasing = FastOutSlowInEasing
 
 // ============================================================================
 // Public API
@@ -158,6 +206,7 @@ fun SushiTile(
     isDragging: Boolean,
     tileAnim: AnimationEngine.TileAnim? = null,
     offsetYCells: Float = 0f,
+    offsetXCells: Float = 0f,
     modifier: Modifier = Modifier,
     onClick: () -> Unit = {},
     onDragStart: () -> Unit = {},
@@ -239,8 +288,8 @@ fun SushiTile(
     // 注意 tile 在 frame 1 就已经渲染在**目标行**了，位移的作用是把它
     // 「往上推」到起点，动画到 0 的过程才是视觉上的下落。
     //
-    // 但相位间隔（ANIM_PHASE_MS = 100ms）与动画时长（CASCADE_ANIM_MS = 100ms）
-    // 相等，frame 2 到达时第一段动画往往还没跑完。此时 animateFloatAsState
+    // 但相位间隔与动画时长相等（ANIM_PHASE_MS 直接引用 CASCADE_ANIM_MS，
+    // 所以恒等），frame 2 到达时第一段动画往往还没跑完。此时 animateFloatAsState
     // 看到 targetValue 从 -落差 突变为 0，会**从当前值重新起跑一段新动画** ——
     // 而当前值是个中间量，于是 tile 先往上跳回一点再落下。那就是回弹。
     //
@@ -321,6 +370,112 @@ fun SushiTile(
     }
     val animOffsetY = cascadeOffset
 
+    // ========================================================================
+    // 重排位移（X + Y 双分量 + 弧线）
+    // ========================================================================
+    //
+    // 与级联下落共用「组合期置位 → 动画到 0」的模式，但多两件事：
+    //   1. X 方向也要动（洗牌是二维搬家，下落只有 Y）
+    //   2. 走弧线而非直线
+    //
+    // ## 为什么不复用 cascadeOffset
+    //
+    // 那个只有 Y 分量，且 key 是 `cascadeOffsetYTarget` 单值。重排要两个
+    // 分量同步推进，共用一个 Animatable 会让 X/Y 各跑一条 LaunchedEffect，
+    // 中途重组时两者进度不同 —— 视觉上是先斜着走再拐弯。
+    //
+    // ## 为什么不用 animateFloatAsState
+    //
+    // 同一个坑：重排帧序列是 `Reshuffling(带位移) → Stable(位移 0)`，
+    // 后一帧到达时前一段动画可能还没跑完，声明式动画会从中间值重新起跑，
+    // 表现为「快到位了又弹一下」。见上面 CASCADE 那段的详细分析。
+    val reshuffleAnim = tileAnim as? AnimationEngine.TileAnim.Reshuffling
+
+    // 起点位移（像素）。符号约定与 offsetYCells 一致：engine 给的是
+    // 「来源 - 目标」的格数差，Compose 里 y 向下为正、x 向右为正，
+    // 而 tile 已渲染在目标格，所以位移直接就是「往起点方向推」的量。
+    //
+    // 注意这里**不取负** —— 与级联那边不同。engine 的 offsetX/offsetY
+    // 对重排给的已经是 `source - target`（负值表示起点在左上），
+    // 正是 Compose 需要的方向。级联的 offsetY 是「往下落了几格」的正值
+    // 领域语义，才需要取负。两处口径不同，都在注释里钉住。
+    val reshuffleTargetX: Float = (reshuffleAnim?.let { offsetXCells } ?: 0f) * cellSizePx
+    val reshuffleTargetY: Float = (reshuffleAnim?.let { offsetYCells } ?: 0f) * cellSizePx
+
+    // 进度 0→1。用它同时驱动 X、Y 和弧线偏移，保证三者永远同相位。
+    var reshuffleProgress by remember(tileId) { mutableStateOf(if (reshuffleAnim != null) 0f else 1f) }
+    var lastReshuffleKey by remember(tileId) { mutableStateOf(reshuffleTargetX to reshuffleTargetY) }
+
+    // 组合期同步置位：target 变了就把进度打回 0（回到起点）。
+    // 与级联那边同理 —— 靠 LaunchedEffect 会先渲染一帧在终点，就是「闪」。
+    if ((reshuffleTargetX to reshuffleTargetY) != lastReshuffleKey) {
+        reshuffleProgress = if (reshuffleAnim != null) 0f else 1f
+        lastReshuffleKey = reshuffleTargetX to reshuffleTargetY
+    }
+
+    LaunchedEffect(tileId, reshuffleTargetX, reshuffleTargetY) {
+        if (reshuffleAnim == null) {
+            reshuffleProgress = 1f
+            return@LaunchedEffect
+        }
+        animate(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = tween(
+                durationMillis = RESHUFFLE_ANIM_MS,
+                easing = ReshuffleEasing,
+            ),
+        ) { value, _ ->
+            reshuffleProgress = value
+        }
+    }
+
+    // 弧线合成。
+    //
+    // ## 怎么把直线掰成弧
+    //
+    // 直线插值是「从起点线性推向 0」：
+    //
+    //   straight = start * (1 - t)
+    //
+    // 弧线 = 直线 + 一个**垂直于运动方向**的偏移，偏移量在中点最大、
+    // 两端为 0。用 sin(πt) 做这个包络：t=0 和 t=1 时为 0，t=0.5 时为 1。
+    //
+    //   perpendicular = normalize(rotate90(direction)) * arcHeight * sin(πt)
+    //
+    // 旋转 90° 取 `(-dy, dx)`（Compose 坐标系下顺时针），所以所有寿司的
+    // 弧都朝同一侧弯 —— 整盘看起来是一致的旋转感，而不是各自乱拐。
+    //
+    // 弧高与距离成正比（`ARC_RATIO`），远的弯得多、近的弯得少。固定弧高
+    // 会让只挪一格的 tile 划出夸张的大弯，而横跨全盘的 tile 看着几乎是直线。
+    val reshuffleOffset: Offset = if (reshuffleAnim == null) {
+        Offset.Zero
+    } else {
+        val t = reshuffleProgress
+        // 直线部分：从起点位移衰减到 0。
+        val straightX = reshuffleTargetX * (1f - t)
+        val straightY = reshuffleTargetY * (1f - t)
+
+        // 运动方向 = 从起点指向终点 = -(起点位移)。
+        val dirX = -reshuffleTargetX
+        val dirY = -reshuffleTargetY
+        val dist = sqrt(dirX * dirX + dirY * dirY)
+
+        if (dist < 0.5f) {
+            // 距离几乎为 0（不该出现在 Reshuffling 里，但防一手除零）。
+            Offset(straightX, straightY)
+        } else {
+            // 垂直方向单位向量：把方向向量转 90°。
+            val perpX = -dirY / dist
+            val perpY = dirX / dist
+
+            val arcHeight = dist * ARC_RATIO
+            val bulge = arcHeight * sin(PI.toFloat() * t)
+
+            Offset(straightX + perpX * bulge, straightY + perpY * bulge)
+        }
+    }
+
     // Live drag offset (in pixels). Reset to Zero in onDragEnd / onDragCancel
     // so the animateFloatAsState tween smoothly snaps the tile back.
     // 同样用 tileId 而非 type 作 key：换 tile 时清零拖拽位移，
@@ -353,7 +508,14 @@ fun SushiTile(
         animationSpec = tween(durationMillis = ANIM_DURATION_MS),
         label = "sushiTile.dragOffsetY",
     )
-    val animatedOffsetY = animatedDragOffsetY + animOffsetY
+    // 最终位移 = 拖拽 + 级联下落 + 重排弧线。
+    //
+    // 三者相加而非嵌套动画：每一项都已经是各自动画的输出值，再套一层 tween
+    // 就会产生二阶滞后（见上面 animatedDragOffsetY 那段注释里的回弹分析）。
+    //
+    // 实践上三者不会同时非零 —— 重排时不能拖拽，级联时手势被锁 —— 但相加
+    // 天然处理了边界情况，不需要额外的互斥判断。
+    val animatedOffsetY = animatedDragOffsetY + animOffsetY + reshuffleOffset.y
 
     val bitmap = imageBitmap
     if (bitmap != null) {
@@ -370,7 +532,11 @@ fun SushiTile(
                 .size(cellSizeDp)
                 .offset {
                     IntOffset(
-                        animatedOffsetX.roundToInt(),
+                        // ⚠️ 重排的 X 位移在这里相加，**不能**塞进上面
+                        // animatedOffsetX 那个 animateFloatAsState 的 targetValue。
+                        // 那会把已经是动画输出的值再喂给一个 tween ——
+                        // 正是 SushiTile 历史上「落到位后弹一下」的成因。
+                        (animatedOffsetX + reshuffleOffset.x).roundToInt(),
                         animatedOffsetY.roundToInt(),
                     )
                 }

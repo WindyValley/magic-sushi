@@ -28,7 +28,13 @@ class AppScreenSaverTest {
 
     /** 所有屏幕，供遍历用。新增屏幕时这里会漏 —— 见 allScreensAreCovered。 */
     private val allScreens =
-        listOf(AppScreen.Menu, AppScreen.Game, AppScreen.History, AppScreen.Settings)
+        listOf(
+            AppScreen.Menu,
+            AppScreen.Game,
+            AppScreen.History,
+            AppScreen.Settings,
+            AppScreen.About,
+        )
 
     @Test
     fun `每个屏幕的 key 都能往返还原为同一单例`() {
@@ -88,9 +94,10 @@ class AppScreenSaverTest {
                 AppScreen.Game -> true
                 AppScreen.History -> true
                 AppScreen.Settings -> true
+                AppScreen.About -> true
             }
             assertTrue(covered)
         }
-        assertEquals("allScreens 数量与已知屏幕不一致", 4, allScreens.size)
+        assertEquals("allScreens 数量与已知屏幕不一致", 5, allScreens.size)
     }
 }

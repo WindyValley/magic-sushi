@@ -55,15 +55,29 @@ sealed interface AppScreen {
     }
 
     /**
-     * 设置页：音效开关、清空数据、关于。
+     * 设置页：音效开关、清空数据、版本号。
      *
      * ⚠️ 单层页面，**没有子页**。这一点关系到导航方案的选择：本文件顶部
      * 列出的演进条件之一是「设置页的多级子页（需要返回栈）」，若将来这里
      * 要长出二级页面，就该换 navigation-compose 而不是在 when 里再套一层
      * 屏幕状态。
+     *
+     * 关于页是 [About] —— 与本页**平级**，从主菜单进入，不是设置的子页。
+     * 那样做正是上面警告的情况。
      */
     data object Settings : AppScreen {
         override val key: String = "settings"
+    }
+
+    /**
+     * 关于页：项目信息与版权声明。
+     *
+     * 与 [Settings] 平级而非其子页 —— 见 [Settings] 的说明。设置页里的
+     * 「版本」一行保留（它是设置的一部分，用户在那儿顺手就能看到版本号），
+     * 关于页承载的是更长的项目信息与法律文本。
+     */
+    data object About : AppScreen {
+        override val key: String = "about"
     }
 
     companion object {
@@ -77,6 +91,7 @@ sealed interface AppScreen {
             Game.key -> Game
             History.key -> History
             Settings.key -> Settings
+            About.key -> About
             else -> Menu
         }
     }

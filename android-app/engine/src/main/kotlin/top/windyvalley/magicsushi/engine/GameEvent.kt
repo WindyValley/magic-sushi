@@ -60,4 +60,16 @@ sealed interface GameEvent {
      * @property score 打破纪录时的最终分数。
      */
     data class NewRecord(val score: Int) : GameEvent
+
+    /**
+     * 棋盘陷入死局（任何相邻交换都凑不出三连），已自动重排。
+     *
+     * 必须让玩家知道 —— 否则棋盘无故跳变会被当成 bug。重排本身不是惩罚，
+     * 也不扣时间扣分，只是把无解局面换成有解的。
+     *
+     * 建模为事件而非 [GameState] 字段：这是**瞬时通知**，一次重排提示一次。
+     * 做成 state 字段会遇到「同一个 true 值连续两次重排时 Compose 认为
+     * 没变化、第二次不触发」的经典陷阱，还得额外加清除方法复位。
+     */
+    data object BoardReshuffled : GameEvent
 }
