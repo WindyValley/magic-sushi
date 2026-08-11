@@ -1,6 +1,5 @@
 package top.windyvalley.magicsushi.ui.screen
 
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -32,7 +32,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import top.windyvalley.magicsushi.BuildConfig
@@ -41,6 +40,7 @@ import top.windyvalley.magicsushi.engine.GamePhase
 import top.windyvalley.magicsushi.engine.GameState
 import top.windyvalley.magicsushi.engine.RoundExitOptions
 import top.windyvalley.magicsushi.ui.canvas.GameCanvas
+import top.windyvalley.magicsushi.ui.component.TopToast
 import top.windyvalley.magicsushi.ui.theme.SushiBgDark
 import top.windyvalley.magicsushi.viewmodel.GameViewModel
 
@@ -84,16 +84,19 @@ fun GameScreen(
 
     // 死局自动重排提示。
     //
-    // 用 Toast 而非 Snackbar：项目里没有 Scaffold / SnackbarHost 基础设施，
-    // 为一条提示引入整套 Material Scaffold 不划算。Toast 也不会遮住棋盘。
+    // 从 Toast 改成自绘顶部浮层：Toast 的位置由系统决定（屏幕下方），棋盘
+    // 下移后视线在中部偏下，Toast 在更下方弹出容易被忽略。
     //
     // 订阅 events 而非读 state 字段 —— 这是瞬时通知，连续两次重排必须提示
     // 两次，而 state 字段在「同一个 true 连续赋值」时不会触发重组。
-    val context = LocalContext.current
+    var toastMessage by remember { mutableStateOf<String?>(null) }
+    var toastToken by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) {
         viewModel.events.collect { event ->
             if (event is GameEvent.BoardReshuffled) {
-                Toast.makeText(context, "局面无解，已自动重排", Toast.LENGTH_SHORT).show()
+                toastMessage = "局面无解，已自动重排"
+                // 递增 token 让 TopToast 知道「这是新的一次」，即使文字相同。
+                toastToken++
             }
         }
     }
@@ -188,6 +191,16 @@ fun GameScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            // 顶部行与棋盘之间的弹性空隙。
+            //
+            // 之前棋盘紧贴顶部行，整体偏上，屏幕下方留一大片空白 —— 顶部弹出的
+            // 提示离棋盘太远，视线在棋盘上时不容易注意到。
+            //
+            // 用 weight 而不是固定 dp：不同屏幕比例下都能保持棋盘居中偏下，
+            // 写死 dp 在短屏上会把棋盘挤出可视区。上下 1:2 让棋盘略微偏上于
+            // 正中，给底部得分区留出呼吸空间。
+            Spacer(modifier = Modifier.weight(1f))
+
             // 中间棋盘
             GameCanvas(
                 presentation = state.presentation,
@@ -197,7 +210,7 @@ fun GameScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.weight(2f))
 
             // 底部：得分 + 静音
             ScoreOverlay(
@@ -205,7 +218,21 @@ fun GameScreen(
                 highScore = state.highScore,
                 modifier = Modifier.fillMaxWidth(),
             )
+
+            Spacer(modifier = Modifier.height(12.dp))
         }
+
+        // 顶部浮出提示。
+        //
+        // 放在 Column 之后、同一个 Box 内 —— Box 里后声明的在上层，所以它
+        // 浮在棋盘上方而不被遮住。挂在 Box 上而非 Column 里，是为了不参与
+        // Column 的垂直排布（否则提示出现/消失会把棋盘顶来顶去）。
+        TopToast(
+            message = toastMessage,
+            token = toastToken,
+            onDismiss = { toastMessage = null },
+            modifier = Modifier.padding(top = 56.dp),
+        )
     }
 
     // 暂停对话框：phase == PAUSED 是唯一判据。
