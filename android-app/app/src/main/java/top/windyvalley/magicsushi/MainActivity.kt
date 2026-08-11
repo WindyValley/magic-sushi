@@ -23,6 +23,7 @@ import androidx.lifecycle.Lifecycle
 import top.windyvalley.magicsushi.engine.GamePhase
 import top.windyvalley.magicsushi.ui.navigation.AppScreen
 import top.windyvalley.magicsushi.ui.navigation.AppScreenSaver
+import top.windyvalley.magicsushi.ui.screen.AboutScreen
 import top.windyvalley.magicsushi.ui.screen.GameScreen
 import top.windyvalley.magicsushi.ui.screen.HistoryScreen
 import top.windyvalley.magicsushi.ui.screen.MainMenuScreen
@@ -306,7 +307,20 @@ private fun AppRoot(
                 // 「菜单是否显示继续上局」的缓存也要失效 —— 否则回到菜单
                 // 仍会看到「继续上局」，点进去却恢复不出任何东西。
                 onClearHistory = { viewModel.clearHistory { hasSavedRound = false } },
+                onAbout = { screen = AppScreen.About },
                 onBack = { screen = AppScreen.Menu },
+            )
+        }
+
+        AppScreen.About -> {
+            // 返回固定回设置页 —— 关于页只有一个入口（设置里的「关于本作」），
+            // 所以不需要记来源。将来若主菜单也加入口，这里就得记了；那也是
+            // 该换 navigation-compose 的信号之一（返回栈需求）。
+            BackHandler { screen = AppScreen.Settings }
+
+            AboutScreen(
+                versionName = BuildConfig.VERSION_NAME,
+                onBack = { screen = AppScreen.Settings },
             )
         }
     }

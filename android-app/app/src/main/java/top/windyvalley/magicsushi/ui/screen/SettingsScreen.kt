@@ -1,6 +1,7 @@
 package top.windyvalley.magicsushi.ui.screen
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -78,6 +79,7 @@ import top.windyvalley.magicsushi.ui.theme.SushiBgDark
  *                       依赖 BuildConfig，便于预览与测试）。
  * @param onToggleMute   切换静音。
  * @param onClearHistory 清空记录：历史 + 快照（最高分随之归零，已经过二次确认）。
+ * @param onAbout        进入关于页（项目信息与版权声明）。
  * @param onBack         返回上一屏。
  */
 @Composable
@@ -87,6 +89,7 @@ fun SettingsScreen(
     versionName: String,
     onToggleMute: () -> Unit,
     onClearHistory: () -> Unit,
+    onAbout: () -> Unit,
     onBack: () -> Unit,
 ) {
     // 清空历史的确认框是否显示。
@@ -205,6 +208,37 @@ fun SettingsScreen(
                         text = versionName,
                         color = Color(0x99FFE8C5),
                         fontSize = 15.sp,
+                    )
+                }
+
+                // 进关于页。
+                //
+                // 关于页是与本页**平级**的 `AppScreen.About`，不是嵌套子页 ——
+                // `AppScreen.kt` 把「设置页的多级子页」列为该换
+                // navigation-compose 的信号，而这里导航状态仍是扁平的
+                // `when`，只是多了一条 Settings → About 的边。
+                //
+                // 从设置进入而非主菜单：关于页在设置里是通行习惯，且主菜单
+                // 已有四个按钮，再加一个会稀释「开始游戏」的视觉权重。
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onAbout)
+                        .padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "关于本作",
+                        color = Color(0xFFFFE8C5),
+                        fontSize = 16.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    // 用 › 而非 emoji 箭头 —— 基础符号字体覆盖更稳
+                    // （TopToast 那里 🔀 降级成豆腐块踩过这个坑）。
+                    Text(
+                        text = "›",
+                        color = Color(0x99FFE8C5),
+                        fontSize = 20.sp,
                     )
                 }
 
