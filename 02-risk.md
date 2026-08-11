@@ -6,7 +6,7 @@
 
 | 风险 | 影响 | 概率 | 缓解策略 | 责任人 | 状态 |
 |------|------|------|---------|--------|------|
-| R-001 借用 EXL 素材的 LICENSE 不明确 | 法务 | M | 项目内置 About 页面致谢原作者；正式发布前审查 LICENSE | main | monitoring |
+| R-001 借用 EXL 素材的 LICENSE 不明确 | 法务 | M | **已确认发生**（2026-08-11）：EXL/Magic-Sushi 仓库 `license = none`，无 LICENSE 可审；素材源自 MTK 固件，EXL 自身无转授权资格。处置：移除本项目 MIT LICENSE，改为保留所有权利 + 非商用声明（`NOTICE.md`），权利人异议时立即移除素材 | main | **confirmed / mitigated** |
 | R-002 Android 模拟器 Canvas 性能不足 | 体验 | L | 真机测试优先；Compose Canvas 在 API 21+ 硬件加速正常 | main | monitoring |
 | R-003 棋盘初始化死循环（随机生成保证不了首屏无三连） | 功能 | L | 算法加兜底：随机生成后跑一遍消除检测，如有则重新生成 | main | monitoring |
 | R-004 连锁检测算法复杂度高（7×7 连锁最坏 O(n²)） | 性能 | L | 核心逻辑层单元测试覆盖 > 80%；实测监控帧率 | main | monitoring |

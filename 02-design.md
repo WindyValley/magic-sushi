@@ -10,7 +10,8 @@
 
 ### 1.1 项目
 
-Magic Sushi（魔法寿司）Android 版本，复刻 MTK 原版三消游戏。
+Magic Sushi（魔法寿司）Android 版本，受 MTK 原版三消游戏启发，玩法规则由
+作者重新定义（非复刻，差异见 01-requirements.md §1.2）。
 
 ### 1.2 核心约束（来自需求）
 

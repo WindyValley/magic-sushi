@@ -19,7 +19,9 @@
 
 - [x] `README.md` 完善：截图说明 + 操作说明 + 构建指南 + 项目结构 + 架构图（3331 字节）
 - [x] `05-release-notes.md` 写 v1.0 变更（1127 字节）
-- [x] `LICENSE` 文件（MIT for 代码，1077 字节）
+- [x] ~~`LICENSE` 文件（MIT for 代码，1077 字节）~~ —— **v1.0.0 后移除**，
+      改为 `NOTICE.md`（保留所有权利 + 非商用声明）。原因：素材无授权，
+      声明 MIT 属越权，见 02-risk.md R-001
 - [x] `references/test-report-v1.0.md` 框架（待 T-TEST-001 填数据，1329 字节）
 
 ## 技术要点

@@ -13,8 +13,14 @@
 
 ## 来源
 
-- 需求：FR-5.1（基础 +10/寿司）, FR-5.2（combo 加成）, FR-5.3（4 连+20/5 连+50）
+- 需求：FR-5.1（基础 10 分/寿司）, FR-5.2（连锁倍数）, FR-5.3（长度倍数）
 - 设计：02-design.md §2.2
+
+> ⚠️ **本页验收标准记录的是初版加法设计**（4 连 +20、5 连 +50、combo 按
+> `(comboCount - 1)` 倍）。实现最终采用**乘数模型**：
+> `10 × 消除个数 × 长度倍数 × 连锁倍数`，接口也不是 `calculateScore` 而是
+> `ScoreEngine.scoreForMatch(match, combo)`。当前规则以 `ScoreEngine` 与
+> 01-requirements.md FR-5 为准。
 
 ## 验收标准
 
