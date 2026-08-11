@@ -2,6 +2,7 @@ package top.windyvalley.magicsushi.ui.screen
 
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,9 +31,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import top.windyvalley.magicsushi.BuildConfig
 import top.windyvalley.magicsushi.engine.GameEvent
 import top.windyvalley.magicsushi.engine.GamePhase
 import top.windyvalley.magicsushi.engine.GameState
@@ -135,6 +138,47 @@ fun GameScreen(
                         modifier = Modifier.padding(horizontal = 4.dp),
                     )
                 }
+
+                // 调试入口：长按 🐞 强制造死局并立刻重排。
+                //
+                // ## 关于「release 包里有没有这段代码」
+                //
+                // `BuildConfig.DEBUG` 是编译期常量，release 下这个分支**永不
+                // 执行**。但本项目 `isMinifyEnabled = false`（见 build.gradle.kts
+                // 的说明：混淆需要单独一轮序列化验证，尚未做），所以 R8 不运行，
+                // 方法体和 `DeadlockEngine.forceDeadlock` 的引用**仍然在 APK 里**。
+                //
+                // 已用 dexdump 核实：release 的 classes2.dex 里 `forceDeadlock`
+                // 和 `debugForceDeadlock` 两个方法都存在。
+                //
+                // 这可以接受 —— 玩家碰不到这个入口（分支不执行），多出的死代码
+                // 不到 1KB。等哪天开启 minify，它们会自动被消除。
+                //
+                // ⚠️ 不要因为「反正 R8 会删」就往这里塞敏感逻辑，当前它不会删。
+                //
+                // ## 为什么不用 combinedClickable
+                //
+                // 它需要 `@OptIn(ExperimentalFoundationApi)`，而本项目此前零处
+                // opt-in —— 不为一个调试入口引入第一个实验 API 依赖。
+                // `detectTapGestures` 是稳定 API。
+                if (BuildConfig.DEBUG) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .pointerInput(Unit) {
+                                detectTapGestures(
+                                    onLongPress = { viewModel.debugForceDeadlock() },
+                                )
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = "🐞",
+                            color = Color.White.copy(alpha = 0.35f),
+                        )
+                    }
+                }
+
                 Spacer(modifier = Modifier.width(8.dp))
                 TimerDisplay(
                     remainingSeconds = state.remainingSeconds,

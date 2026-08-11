@@ -290,4 +290,63 @@ class DeadlockEngineTest {
             .filterNotNull()
             .groupingBy { it.type }
             .eachCount()
+
+    // ========================================================================
+    // forceDeadlock（调试入口的唯一依据）
+    // ========================================================================
+
+    @Test
+    fun `forceDeadlock produces a genuinely deadlocked board`() {
+        val board = DeadlockEngine.forceDeadlock(BoardEngine.generateInitialBoard())
+
+        assertTrue(
+            "forceDeadlock 生成的棋盘必须真的是死局 —— 调试入口全靠它，" +
+                "它不准就等于入口在骗人",
+            DeadlockEngine.isDeadlock(board),
+        )
+    }
+
+    @Test
+    fun `forceDeadlock board has no pre-existing matches`() {
+        val board = DeadlockEngine.forceDeadlock(BoardEngine.generateInitialBoard())
+
+        assertTrue(
+            "不能有已成立三连，否则一造出来就自动消除，玩家看不到死局",
+            MatchEngine.detectMatches(board).isEmpty(),
+        )
+    }
+
+    @Test
+    fun `forceDeadlock preserves tile ids and positions`() {
+        val original = BoardEngine.generateInitialBoard()
+        val forced = DeadlockEngine.forceDeadlock(original)
+
+        assertEquals(
+            "id 必须原样保留 —— Compose 用 id 做 key，换了会触发全盘重建",
+            original.grid.flatten().filterNotNull().map { it.id },
+            forced.grid.flatten().filterNotNull().map { it.id },
+        )
+
+        forced.grid.forEachIndexed { row, cells ->
+            cells.forEachIndexed { col, tile ->
+                if (tile != null) {
+                    assertEquals("tile.row 必须与所在位置一致", row, tile.row)
+                    assertEquals("tile.col 必须与所在位置一致", col, tile.col)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `forceDeadlock output can be reshuffled back to a solvable board`() {
+        val forced = DeadlockEngine.forceDeadlock(BoardEngine.generateInitialBoard())
+        val (settled, didReshuffle) = DeadlockEngine.reshuffleIfDeadlocked(forced, Random(7))
+
+        assertTrue("forceDeadlock 的产物必须能被重排救回来", didReshuffle)
+        assertTrue("重排后必须有解", DeadlockEngine.hasValidMove(settled))
+        assertTrue(
+            "重排后不能有已成立三连",
+            MatchEngine.detectMatches(settled).isEmpty(),
+        )
+    }
 }

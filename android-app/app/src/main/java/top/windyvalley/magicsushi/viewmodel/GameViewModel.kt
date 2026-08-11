@@ -1232,6 +1232,51 @@ class GameViewModel(
     }
 
     // ========================================================================
+    // 调试专用
+    // ========================================================================
+
+    /**
+     * 把当前棋盘强制变成死局，用于验证自动重排。
+     *
+     * 自然玩法下死局概率极低，靠运气可能玩很久都碰不到，没法验证重排的真机
+     * 表现。这个入口提供确定性触发。
+     *
+     * ## 为什么守卫放在调用方
+     *
+     * `BuildConfig.DEBUG` 的判断在 `GameScreen` 的手势那一侧，不在这里。
+     * 这样 debug 与 release 的差异集中在一处，读代码时一眼能看到边界。
+     *
+     * ⚠️ 注意本项目 `isMinifyEnabled = false`，R8 不运行 —— 这个方法在
+     * release APK 里**依然存在**（已用 dexdump 核实），只是永远不被调用。
+     * 别当成「正式包里没有这段代码」。
+     *
+     * ## 为什么只在 PLAYING 生效
+     *
+     * 暂停或结算态改棋盘会让状态自相矛盾：结算面板显示的分数对应的是旧棋盘，
+     * 而快照存的是新的。
+     *
+     * ## 为什么造完死局要立刻走重排
+     *
+     * 第一版只把棋盘改成死局就结束，那是个逻辑死结：重排只在消除落定后
+     * （`commitFinalState`）触发，而死局盘上消不掉任何东西 —— 玩家点到
+     * 倒计时归零也等不到重排，看到的只是「游戏卡住了」。
+     *
+     * 所以这里直接把「造死局 → 检测 → 重排 → 发通知」跑完，一次长按看到
+     * 完整流程。想单独观察死局本身，可以先看 Toast 弹出前的那一帧。
+     */
+    fun debugForceDeadlock() {
+        if (_state.value.phase != GamePhase.PLAYING) return
+
+        val deadlocked = DeadlockEngine.forceDeadlock(_state.value.board)
+        val (settled, didReshuffle) = DeadlockEngine.reshuffleIfDeadlocked(deadlocked)
+
+        _state.update { it.copy(board = settled, selectedTile = null) }
+
+        // 走的是与真实死局完全相同的通知路径，所以这个入口也能验证 Toast。
+        if (didReshuffle) _events.tryEmit(GameEvent.BoardReshuffled)
+    }
+
+    // ========================================================================
     // 设置页面：清空数据
     // ========================================================================
 

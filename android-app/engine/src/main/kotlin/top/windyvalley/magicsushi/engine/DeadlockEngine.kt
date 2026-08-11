@@ -223,6 +223,56 @@ object DeadlockEngine {
     }
 
     /**
+     * 构造一个必然死局的棋盘，**仅供调试验证使用**。
+     *
+     * 自然玩法下死局概率极低（6 种寿司 7×7），靠运气可能玩很久都遇不到，
+     * 没法验证重排逻辑的真机表现。这个函数提供确定性的触发方式。
+     *
+     * ## 为什么 2×2 分块图案必然死局
+     *
+     * ```
+     *   A A B B A A B
+     *   A A B B A A B
+     *   C C D D C C D
+     *   C C D D C C D
+     *   A A B B A A B
+     *   A A B B A A B
+     *   C C D D C C D
+     * ```
+     *
+     * 每种类型都以 2×2 块出现，任意方向最长同色连续段都是 2。交换任何一对
+     * 相邻格，只能把某个 2 段拆成 1+1 或拼出另一个 2 段 —— 永远凑不到 3。
+     *
+     * 这不是猜测：`DeadlockEngineTest` 有一条用例直接对**本函数的输出**
+     * 断言 `isDeadlock == true`，另一条断言它没有已成立三连。改坏了会红。
+     *
+     * ## 保留 tile id
+     *
+     * 只改 [SushiTile.type]，id 与位置沿用传入棋盘 —— 与
+     * [reshuffleIfDeadlocked] 的不变量一致，Compose 不会因此重建 tile。
+     *
+     * @param board 用于取 id / 尺寸的基准棋盘
+     */
+    fun forceDeadlock(board: Board): Board {
+        // 四种类型足够构成分块图案，多的用不上。
+        val palette = listOf(
+            SushiType.SUSHI1, SushiType.SUSHI2,
+            SushiType.SUSHI3, SushiType.SUSHI4,
+        )
+
+        val grid = board.grid.mapIndexed { row, cells ->
+            cells.mapIndexed { col, tile ->
+                // (row/2, col/2) 的奇偶共同决定块的颜色 —— 保证上下、左右
+                // 相邻的块都不同色，不会意外接出 3 连。
+                val blockIndex = (row / 2 % 2) * 2 + (col / 2 % 2)
+                tile?.copy(type = palette[blockIndex])
+            }
+        }
+
+        return board.copy(grid = grid)
+    }
+
+    /**
      * 返回一个把 `(r1,c1)` 和 `(r2,c2)` 类型互换后的浅拷贝棋盘。
      *
      * 只重建受影响的两行，其余行沿用原引用 —— 死局检测要跑
