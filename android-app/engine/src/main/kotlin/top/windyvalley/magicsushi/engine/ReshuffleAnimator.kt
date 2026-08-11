@@ -33,7 +33,14 @@ object ReshuffleAnimator {
     /**
      * 生成重排的两帧。
      *
-     * @param fromBoard 重排前的棋盘（用于取每个 tile 的旧位置）
+     * @param fromBoard 重排前的棋盘。
+     *
+     *                  ⚠️ 当前实现**没有用到它** —— 位移是从 [origin] 映射
+     *                  算的（`来源格 - 目标格`），不需要旧棋盘。编译器会报
+     *                  `Parameter 'fromBoard' is never used`。
+     *
+     *                  留着是因为签名已被 8 处测试引用，删它属于接口变更，
+     *                  不该夹在发版收尾里做。清理时连带更新那些调用点。
      * @param toBoard   重排后的棋盘
      * @param origin    `(目标格) -> (来源格)`，来自
      *                  [DeadlockEngine.ReshuffleResult.origin]
