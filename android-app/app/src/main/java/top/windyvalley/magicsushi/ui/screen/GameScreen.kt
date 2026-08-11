@@ -1,5 +1,6 @@
 package top.windyvalley.magicsushi.ui.screen
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,8 +30,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import top.windyvalley.magicsushi.engine.GameEvent
 import top.windyvalley.magicsushi.engine.GamePhase
 import top.windyvalley.magicsushi.engine.GameState
 import top.windyvalley.magicsushi.engine.RoundExitOptions
@@ -75,6 +78,22 @@ fun GameScreen(
     // 的问题不是「局部」，而是它取代了 phase 成为暂停的判据却从不调用
     // onPause()。这里没有对应风险：确认弹窗没有任何 VM 侧的对偶状态。）
     var showExitConfirm by remember { mutableStateOf(false) }
+
+    // 死局自动重排提示。
+    //
+    // 用 Toast 而非 Snackbar：项目里没有 Scaffold / SnackbarHost 基础设施，
+    // 为一条提示引入整套 Material Scaffold 不划算。Toast 也不会遮住棋盘。
+    //
+    // 订阅 events 而非读 state 字段 —— 这是瞬时通知，连续两次重排必须提示
+    // 两次，而 state 字段在「同一个 true 连续赋值」时不会触发重组。
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        viewModel.events.collect { event ->
+            if (event is GameEvent.BoardReshuffled) {
+                Toast.makeText(context, "局面无解，已自动重排", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     // 离开暂停态时复位。
     //

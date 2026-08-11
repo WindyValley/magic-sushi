@@ -21,6 +21,7 @@ import top.windyvalley.magicsushi.data.SnapshotRepository
 import top.windyvalley.magicsushi.engine.BoardEngine
 import top.windyvalley.magicsushi.engine.AnimationEngine
 import top.windyvalley.magicsushi.engine.CascadeEngine
+import top.windyvalley.magicsushi.engine.DeadlockEngine
 import top.windyvalley.magicsushi.engine.GameEvent
 import top.windyvalley.magicsushi.engine.GameSnapshot
 import top.windyvalley.magicsushi.engine.TileIdGenerator
@@ -394,8 +395,14 @@ class GameViewModel(
         // 回到的是**更早那一局**的残局。
         viewModelScope.launch { snapshotRepo.clear() }
         _state.update { current ->
+            val initialBoard = BoardEngine.generateInitialBoard()
+            // 开局也可能撞上死局（概率极低但非零），直接重排到有解为止。
+            //
+            // 刻意不发 BoardReshuffled 事件：玩家还没看过原始棋盘，
+            // 提示「已重排」只会让人困惑「重排了什么」。
+            val (settledBoard, _) = DeadlockEngine.reshuffleIfDeadlocked(initialBoard)
             GameState(
-                board = BoardEngine.generateInitialBoard(),
+                board = settledBoard,
                 remainingSeconds = TimerEngine.INITIAL_SECONDS,
                 phase = GamePhase.PLAYING,
                 isMuted = prefsRepo.isMuted(),
@@ -1101,9 +1108,15 @@ class GameViewModel(
                 // 写进去会盖掉新局的棋盘。
                 commitFinalState = {
                     if (myGeneration == roundGeneration) {
+                        // 棋盘落定后检测死局。必须放在这里而不是动画开始前 ——
+                        // 连锁结束、重力和补充都跑完，此刻的 finalBoard 才是
+                        // 玩家将要面对的局面。
+                        val (settledBoard, didReshuffle) =
+                            DeadlockEngine.reshuffleIfDeadlocked(cascadeResult.finalBoard)
+
                         _state.update {
                             it.copy(
-                                board = cascadeResult.finalBoard,
+                                board = settledBoard,
                                 animFrame = null,
                                 score = it.score + totalScore,
                                 combo = cascadeResult.cascades.size,
@@ -1111,6 +1124,9 @@ class GameViewModel(
                                 selectedTile = null,
                             )
                         }
+
+                        // 状态落盘后再发通知，保证 UI 弹提示时棋盘已是重排后的。
+                        if (didReshuffle) _events.tryEmit(GameEvent.BoardReshuffled)
                     }
                 }
 
