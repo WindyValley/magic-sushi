@@ -91,4 +91,62 @@ class TimerEngineTest {
     fun `isGameOver is true for negative (defensive)`() {
         assertTrue("isGameOver(-1) should be true (defensive)", TimerEngine.isGameOver(-1))
     }
+
+    // ========================================================================
+    // shouldTick — 消除结算窗口内冻结倒计时
+    // ========================================================================
+
+    @Test
+    fun `shouldTick is true only while playing and not settling`() {
+        assertTrue(
+            "PLAYING 且未结算时应该走表",
+            TimerEngine.shouldTick(phaseIsPlaying = true, settling = false),
+        )
+    }
+
+    @Test
+    fun `shouldTick is false during settling window`() {
+        // 这是本判据存在的理由：消除已判定、结算动画在播，倒计时必须冻结。
+        // 否则剩 1 秒时消除会在动画期间归零判负，奖励的 60 秒永远等不到。
+        assertFalse(
+            "结算窗口内不得走表",
+            TimerEngine.shouldTick(phaseIsPlaying = true, settling = true),
+        )
+    }
+
+    @Test
+    fun `shouldTick is false when not playing`() {
+        assertFalse(
+            "非 PLAYING（暂停/结束/IDLE）不得走表",
+            TimerEngine.shouldTick(phaseIsPlaying = false, settling = false),
+        )
+    }
+
+    @Test
+    fun `shouldTick is false when both not playing and settling`() {
+        // 两个条件同时不满足时也必须是 false —— 防止将来改成 or 之类的手滑。
+        assertFalse(
+            "既不在 PLAYING 又在结算，仍然不得走表",
+            TimerEngine.shouldTick(phaseIsPlaying = false, settling = true),
+        )
+    }
+
+    @Test
+    fun `shouldTick truth table is exhaustive`() {
+        // 穷尽四种组合，锁死语义：只有 (playing=true, settling=false) 走表。
+        val expected = mapOf(
+            (true to false) to true,
+            (true to true) to false,
+            (false to false) to false,
+            (false to true) to false,
+        )
+        for ((input, want) in expected) {
+            val (playing, settling) = input
+            assertEquals(
+                "shouldTick(playing=$playing, settling=$settling)",
+                want,
+                TimerEngine.shouldTick(phaseIsPlaying = playing, settling = settling),
+            )
+        }
+    }
 }

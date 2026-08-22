@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import top.windyvalley.magicsushi.BuildConfig
 import top.windyvalley.magicsushi.audio.SoundPlayer
 import top.windyvalley.magicsushi.data.HistoryRepository
 import top.windyvalley.magicsushi.data.PrefsRepository
@@ -224,6 +225,42 @@ class GameViewModel(
     private var timerJob: Job? = null
 
     /**
+     * 消除结算窗口标志。`true` 期间倒计时冻结。
+     *
+     * ## 为什么需要
+     *
+     * 消除的奖励是「拿回满 60 秒」，但消除不是瞬间的 —— 连锁动画每轮约
+     * 700ms。此前的时序是：
+     *
+     *     判定消除 → 算出 newRemaining=60（局部变量）
+     *              → 播动画（几百 ms ~ 几秒，倒计时照常递减）
+     *              → 动画结束才把 60 写进 state
+     *
+     * 于是剩 1 秒时消除，动画期间 tick 归零直接 `GAME_OVER`，那个 60
+     * 永远等不到 —— 玩家「明明消掉了」却被判负。
+     *
+     * 现在改成：判定成功**立即**把 60 写进 state 并置起本标志，动画期间
+     * 不走表，`commitFinalState` 里落下。
+     *
+     * ## 为什么不进 [GameState]
+     *
+     * 它是**瞬态**的：只在一次消除结算的几百毫秒内为 true。放进 GameState
+     * 会跟着快照序列化落盘，进程被杀后恢复出一个「永远在结算中」的死局
+     * （没有动画协程去把它复位）。
+     *
+     * 用 `@Volatile` 而非普通字段：timerJob 协程和 swap 协程可能跑在不同
+     * 线程上，需要保证写入立即可见。
+     *
+     * ## 复位责任
+     *
+     * 置为 `false` 必须覆盖**所有**退出路径，否则倒计时永久冻结：
+     * 正常播完、动画被取消（restart/pause 打断）、异常。
+     * 见 [onSwapAttempt] 的 `finally`。
+     */
+    @Volatile
+    private var isSettling: Boolean = false
+
+    /**
      * Gesture-level re-entrancy guard. Set to `true` for the duration of
      * [onSwapAttempt] (including the 150ms rollback delay) so the user
      * can't fire a second swap mid-flight. Reset to `false` at the end of
@@ -399,12 +436,49 @@ class GameViewModel(
         // 回到的是**更早那一局**的残局。
         viewModelScope.launch { snapshotRepo.clear() }
         _state.update { current ->
-            val initialBoard = BoardEngine.generateInitialBoard()
+            // debug 构建用固定种子开局 —— 人工验证时能预先算出「哪一步能消除」，
+            // 用 adb 精确点击，不必随机乱划等运气（随机开局可能划几十次都不得分，
+            // 而验证倒计时重置必须先制造一次消除）。
+            //
+            // release 走 null = 系统随机，玩家每局不同。
+            //
+            // 想让 debug 也随机：把 DEBUG_BOARD_SEED 改成 null。
+            val initialBoard = BoardEngine.generateInitialBoard(
+                if (BuildConfig.DEBUG) DEBUG_BOARD_SEED else null
+            )
             // 开局也可能撞上死局（概率极低但非零），直接重排到有解为止。
             //
             // 刻意不发 BoardReshuffled 事件：玩家还没看过原始棋盘，
             // 提示「已重排」只会让人困惑「重排了什么」。
             val settledBoard = DeadlockEngine.reshuffleIfDeadlocked(initialBoard).board
+
+            // debug 构建把开局棋盘打到 logcat。
+            //
+            // 为什么需要：人工验证要先制造一次消除，而「哪一步能消除」必须
+            // 基于**实际棋盘**判断。光有固定种子不够 —— 种子只决定
+            // generateInitialBoard 的输出，之后还过了一道
+            // reshuffleIfDeadlocked，棋盘可能已经不是种子生成的那个。
+            //
+            // 读法：adb logcat -s MagicSushiBoard:D
+            if (BuildConfig.DEBUG) {
+                val dump = buildString {
+                    append("开局棋盘 (seed=")
+                    append(DEBUG_BOARD_SEED)
+                    appendLine("):")
+                    for (r in 0 until settledBoard.size) {
+                        append(r)
+                        append(": ")
+                        appendLine(
+                            // SushiType 是 SUSHI1..SUSHI6，取末位数字即可辨认。
+                            // 别用 take(3) —— 全是共同前缀 "SUS"，打出来一片相同。
+                            (0 until settledBoard.size).joinToString(" ") { c ->
+                                settledBoard.grid[r][c]?.type?.name?.last()?.toString() ?: "."
+                            }
+                        )
+                    }
+                }
+                android.util.Log.d("MagicSushiBoard", dump)
+            }
             GameState(
                 board = settledBoard,
                 remainingSeconds = TimerEngine.INITIAL_SECONDS,
@@ -890,6 +964,20 @@ class GameViewModel(
         timerJob = viewModelScope.launch {
             while (_state.value.phase == GamePhase.PLAYING) {
                 delay(1000)
+
+                // 消除结算窗口内不走表。判据抽在 engine 里，规则可单测。
+                //
+                // ⚠️ 这里是 `continue` 而不是 `break` —— 结算是临时状态，
+                // 动画播完就恢复。break 掉整个循环会让倒计时再也不动，
+                // 而 startTimer 只在开局/恢复时调用。
+                if (!TimerEngine.shouldTick(
+                        phaseIsPlaying = _state.value.phase == GamePhase.PLAYING,
+                        settling = isSettling,
+                    )
+                ) {
+                    continue
+                }
+
                 _state.update { current ->
                     val newRemaining = TimerEngine.tick(current.remainingSeconds)
                     if (newRemaining == 0) {
@@ -953,6 +1041,32 @@ class GameViewModel(
          * 同一个常量：将来调节奏时它们该能各自变化。
          */
         const val ANIM_GAP_MS = 100L
+
+        /**
+         * debug 构建的固定开局种子。仅在 `BuildConfig.DEBUG` 下生效。
+         *
+         * ## 为什么要固定
+         *
+         * 人工验证倒计时、连锁、死局这些行为，前提是先**制造一次消除**。
+         * 随机开局下这件事不可控：可能划几十次都凑不出三连，验证一个
+         * 时序 bug 要先跟随机数搏斗半天。
+         *
+         * 固定种子让棋盘可预测 —— 可以预先算出哪一步能消除，用 adb
+         * 精确点击那两格。
+         *
+         * ## 这个值怎么来的
+         *
+         * `engine/src/test/.../DebugSeedProbe.kt` 暴力扫种子，找「开局
+         * 就有可行解」的那些。seed=1 的解是 **交换 (0,2) ↔ (0,3)**
+         * ——第 0 行是棋盘最上排，屏幕坐标最好定位。
+         *
+         * 换种子后必须重跑那个探针拿新的可行解坐标，否则点了不消除。
+         *
+         * ## 不影响 release
+         *
+         * release 传 `null` = 系统随机。玩家每局棋盘都不同。
+         */
+        const val DEBUG_BOARD_SEED = 1L
     }
 
     // ========================================================================
@@ -1110,9 +1224,21 @@ class GameViewModel(
                 }
 
                 // 5. 消除后倒计时重置回 60s（与 match 数量无关）
+                //
+                // ⚠️ 必须**立即**写进 state 并冻结计时，不能等动画播完。
+                //
+                // 曾经的写法是只算出局部变量、等 commitFinalState 才落盘 ——
+                // 动画期间倒计时照常递减，剩 1 秒时消除会在动画播到一半时
+                // 归零判负，那 60 秒永远等不到。玩家的体验是「我明明消掉了
+                // 却还是输了」。
+                //
+                // 冻结（isSettling）解决的是另一半：多轮连锁动画好几秒，
+                // 不冻结的话奖励会被动画吃掉一部分，连锁越猛扣得越多。
                 val newRemaining = TimerEngine.resetOnMatch(
                     _state.value.remainingSeconds, cascadeResult.cascades.flatten()
                 )
+                isSettling = true
+                _state.update { it.copy(remainingSeconds = newRemaining) }
 
                 // 6. 音效
                 if (cascadeResult.cascades.size > 1) soundPlayer.playCombo()
@@ -1244,6 +1370,15 @@ class GameViewModel(
                 _state.update { it.copy(animFrame = null, selectedTile = null, isRollback = false) }
             } finally {
                 swapProcessing = false
+                // 结算窗口必须在**所有**退出路径上关闭，否则倒计时永久冻结
+                // —— 玩家会看到时间停住、游戏再也不会结束。
+                //
+                // 和 swapProcessing 放在一起是刻意的：两者生命周期完全一致
+                // （都是「这次 swap 处理中」），分开写迟早漏一条路径。
+                //
+                // 覆盖的路径：正常播完、CancellationException（restart /
+                // 新 swap 顶掉旧的 / VM 清理）、其他异常。
+                isSettling = false
             }
         }
     }
