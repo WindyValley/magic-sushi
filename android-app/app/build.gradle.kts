@@ -56,8 +56,8 @@ android {
         //
         // v0.2.0 当时为什么是 MINOR：v0.1.1 之后新增了设置页面（静音开关
         // 首次有 UI 入口、清空历史记录、关于），是向后兼容的新功能。
-        versionCode = 6
-        versionName = "1.1.0"
+        versionCode = 7
+        versionName = "1.1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
